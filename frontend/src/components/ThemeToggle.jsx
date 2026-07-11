@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import { Sun, Moon, Monitor } from 'lucide-react'
 
 const options = [
@@ -26,7 +27,7 @@ export default function ThemeToggle({ theme, setTheme }) {
                 WebkitBackdropFilter: 'blur(8px)',
             }}
         >
-            {options.map(({ id, icon: Icon, label }) => {
+            {options.map(({ id, icon, label }) => {
                 const active = theme === id
                 return (
                     <button
@@ -51,7 +52,7 @@ export default function ThemeToggle({ theme, setTheme }) {
                             boxShadow: active ? '0 1px 6px var(--accent-glow)' : 'none',
                         }}
                     >
-                        <Icon size={16} />
+                        {createElement(icon, { size: 16 })}
                     </button>
                 )
             })}
