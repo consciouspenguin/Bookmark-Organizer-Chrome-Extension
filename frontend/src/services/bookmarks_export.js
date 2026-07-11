@@ -1,5 +1,3 @@
-/* global chrome */
-
 // HTML escape function to prevent XSS
 function escapeHtml(text) {
     if (!text) return '';
