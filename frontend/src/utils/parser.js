@@ -28,13 +28,12 @@ export const parseBookmarks = (htmlContent) => {
     const parser = new DOMParser();
     const doc = parser.parseFromString(stripped, "text/html");
     const links = [];
-    const seen = new Set();
 
     doc.querySelectorAll("a").forEach(a => {
         const url = a.href;
-        // Basic validation and dedup
-        if (url && !seen.has(url) && !url.startsWith("place:")) {
-            seen.add(url);
+        // Basic validation. Deduplication is controlled later by the organizer
+        // so the user's toggle works consistently for file and browser modes.
+        if (url && !url.startsWith("place:")) {
             const entry = {
                 title: a.textContent.trim() || "Untitled",
                 url: url,

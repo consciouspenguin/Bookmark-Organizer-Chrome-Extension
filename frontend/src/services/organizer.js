@@ -2,14 +2,26 @@ import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, sho
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 
+// Preserve the first occurrence so the output stays deterministic and never
+// writes more than one bookmark for an exact duplicate URL.
+export function removeDuplicateUrls(bookmarks) {
+    const seenUrls = new Set();
+    return bookmarks.filter((bookmark) => {
+        if (seenUrls.has(bookmark.url)) return false;
+        seenUrls.add(bookmark.url);
+        return true;
+    });
+}
+
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.5-flash", subfolderTarget = "5-10", sortAlphabetically = true) {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.5-flash", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true) {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
         this.model = model;
         this.subfolderTarget = subfolderTarget;
         this.sortAlphabetically = sortAlphabetically;
+        this.removeDuplicates = removeDuplicates;
         this.batchSize = 35;
         this.isCancelled = false;
     }
@@ -59,6 +71,18 @@ export class OrganizerService {
         }
 
         this.onProgress({ status: 'info', message: `Found ${allLinks.length} bookmarks.` });
+
+        if (this.removeDuplicates) {
+            const originalCount = allLinks.length;
+            allLinks = removeDuplicateUrls(allLinks);
+            const duplicatesRemoved = originalCount - allLinks.length;
+            this.onProgress({
+                status: 'info',
+                message: duplicatesRemoved > 0
+                    ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
+                    : 'No duplicate URLs found.'
+            });
+        }
 
         if (allLinks.length === 0) {
             this.onProgress({ status: 'done', message: 'No bookmarks to organize.' });
@@ -244,4 +268,3 @@ export class OrganizerService {
         return finalResults;
     }
 }
-
