@@ -262,9 +262,9 @@ export class OrganizerService {
         if (this.isCancelled) {
             this.onProgress({ status: 'warning', message: 'Process cancelled.' });
             return null;
-        } else {
-            this.onProgress({ status: 'done', message: 'Organization complete!' });
-            return finalResults;
         }
+
+        this.onProgress({ status: 'done', message: 'Organization complete!' });
+        return finalResults;
     }
 }
