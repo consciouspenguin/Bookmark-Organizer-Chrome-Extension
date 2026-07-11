@@ -17,9 +17,6 @@ export default function Organizer() {
     const [apiKey, setApiKey] = useState('')
     const provider = useMemo(() => detectProvider(apiKey), [apiKey])
 
-    // Keep only one copy of each exact URL in the organized output.
-    const [removeDuplicates, setRemoveDuplicates] = useState(true)
-
     // Model Selection
     const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
     const models = useMemo(() => [
@@ -43,6 +40,12 @@ export default function Organizer() {
     ])
     const [newCategory, setNewCategory] = useState('')
 
+    // Sort folders/bookmarks alphabetically after classification
+    const [sortAlphabetically, setSortAlphabetically] = useState(true)
+
+    // Keep only one copy of each exact URL in the organized output.
+    const [removeDuplicates, setRemoveDuplicates] = useState(true)
+
     // Subfolder Target Size
     const [subfolderTarget, setSubfolderTarget] = useState('5-10')
     const subfolderOptions = useMemo(() => [
@@ -57,10 +60,11 @@ export default function Organizer() {
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['apiKey', 'selectedModel', 'subfolderTarget', 'removeDuplicates', 'organizedMeta'], (result) => {
+            chrome.storage.local.get(['apiKey', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.selectedModel) setSelectedModel(result.selectedModel)
                 if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
+                if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
@@ -89,19 +93,24 @@ export default function Organizer() {
         updateSetting('subfolderTarget', target)
     }, [updateSetting])
 
+    const handleSortToggle = useCallback((enabled) => {
+        setSortAlphabetically(enabled)
+        updateSetting('sortAlphabetically', enabled)
+    }, [updateSetting])
+
     const handleRemoveDuplicatesToggle = useCallback((enabled) => {
         setRemoveDuplicates(enabled)
         updateSetting('removeDuplicates', enabled)
     }, [updateSetting])
 
-    const addLog = useCallback((message) => {
-        setLogs(prev => [...prev, { message, timestamp: new Date() }])
-    }, [])
-
     // File Upload Handlers
     const [uploadedFile, setUploadedFile] = useState(null)
     const [parsedBookmarks, setParsedBookmarks] = useState(null)
     const fileInputRef = useRef(null)
+
+    const addLog = useCallback((message) => {
+        setLogs(prev => [...prev, { message, timestamp: new Date() }])
+    }, [])
 
     const processFile = useCallback((file) => {
         if (!file.name.endsWith('.html') && !file.name.endsWith('.htm')) {
@@ -126,9 +135,9 @@ export default function Organizer() {
         reader.readAsText(file);
     }, [addLog])
 
-    const handleFileSelect = useCallback((e) => {
-        const file = e.target.files[0]
-        if (file) processFile(file)
+    const handleFileSelect = useCallback(async (e) => {
+        const file = e.target.files[0];
+        if (file) processFile(file);
     }, [processFile])
 
     const handleDrop = useCallback((e) => {
@@ -190,6 +199,7 @@ export default function Organizer() {
                 { message: 'Starting AI Organization...', timestamp: new Date() },
                 { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
                 { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
+                { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
                 { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() }
             ])
             setProgress(0)
@@ -200,24 +210,25 @@ export default function Organizer() {
                 categories,
                 (data) => {
                     if (data.status === 'info') {
-                        addLog(`${data.message}`)
+                        addLog(data.message)
                     } else if (data.status === 'progress') {
                         setProgress(data.percent)
                     } else if (data.status === 'warning') {
-                        addLog(`${data.message}`)
+                        addLog(data.message)
                     } else if (data.status === 'error') {
                         setErrorMsg(data.message)
                         setStatus('error')
                     } else if (data.status === 'success') {
-                        addLog(`${data.message}`)
+                        addLog(data.message)
                     } else if (data.status === 'done') {
-                        addLog(`${data.message}`)
+                        addLog(data.message)
                         setStatus('complete')
                         setProgress(100)
                     }
                 },
                 selectedModel,
                 subfolderTarget,
+                sortAlphabetically,
                 removeDuplicates
             )
 
@@ -244,7 +255,7 @@ export default function Organizer() {
             setErrorMsg("Failed to start process.")
             setStatus('error')
         }
-    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, removeDuplicates])
+    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates])
 
     return (
         <div className="glass-panel" style={{ width: '100%', padding: '2rem', textAlign: 'left', boxSizing: 'border-box' }}>
@@ -366,17 +377,45 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Alphabetic Sorting */}
+            {/* Alphabetical Sorting Toggle */}
             {status === 'idle' && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                    <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                        Alphabetic Sorting
-                    </label>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={() => {}} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', background: 'var(--accent-gradient)', color: 'var(--on-accent)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600', transition: 'all 0.2s' }}>Enabled</button>
-                        <button onClick={() => {}} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', background: 'var(--surface-solid)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem', transition: 'all 0.2s' }}>Disabled</button>
+                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                    <div>
+                        <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
+                            Sort Alphabetically
+                        </label>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                            Sort folders and the bookmarks inside them A–Z
+                        </div>
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Bookmarks will be sorted alphabetically</div>
+                    <button
+                        role="switch"
+                        aria-checked={sortAlphabetically}
+                        onClick={() => handleSortToggle(!sortAlphabetically)}
+                        style={{
+                            width: '44px',
+                            height: '24px',
+                            borderRadius: '12px',
+                            border: '1px solid var(--border)',
+                            background: sortAlphabetically ? 'var(--accent)' : 'var(--surface-solid)',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            padding: 0,
+                            flexShrink: 0,
+                            transition: 'background 0.2s ease'
+                        }}
+                    >
+                        <span style={{
+                            position: 'absolute',
+                            top: '2px',
+                            left: sortAlphabetically ? '22px' : '2px',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            background: sortAlphabetically ? 'var(--on-accent)' : 'var(--text-muted)',
+                            transition: 'left 0.2s ease'
+                        }} />
+                    </button>
                 </div>
             )}
 
