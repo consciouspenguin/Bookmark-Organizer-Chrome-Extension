@@ -28,7 +28,7 @@ export const classifyBatch = async (batch, apiKey) => {
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/consciouspenguin/Bookmark-Organizer-Browser-Extension", // Optional for OpenRouter
+                "HTTP-Referer": "https://github.com/n1ecC/Bookmark-Organizer-Browser-Extension", // Optional for OpenRouter
                 "X-Title": "Bookmark Organizer Extension"
             },
             body: JSON.stringify({

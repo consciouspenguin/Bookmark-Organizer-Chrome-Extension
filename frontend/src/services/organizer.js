@@ -14,7 +14,11 @@ export function removeDuplicateUrls(bookmarks) {
 }
 
 export class OrganizerService {
+<<<<<<< HEAD
     constructor(apiKey, categories, onProgress, model = "google/gemini-3.5-flash", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true) {
+=======
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10") {
+>>>>>>> origin/main
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
@@ -262,6 +266,12 @@ export class OrganizerService {
         if (this.isCancelled) {
             this.onProgress({ status: 'warning', message: 'Process cancelled.' });
             return null;
+<<<<<<< HEAD
+=======
+        } else {
+            this.onProgress({ status: 'done', message: 'Organization complete!' });
+            return finalResults;
+>>>>>>> origin/main
         }
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });

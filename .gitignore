@@ -9,6 +9,7 @@ all_bookmarks.html
 organized_bookmarks_clean.html
 bookmark_progress.jsonl
 failed_batches.jsonl
+dummy_bookmarks.html
 
 # Build artifacts
 dist/
