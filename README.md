@@ -51,7 +51,7 @@ You can install this extension manually (no Store required) by downloading the l
 ### Method 2: Build from Source
 If you are a developer and want to modify the code:
 ```bash
-git clone https://github.com/consciouspenguin/Bookmark-Organizer-Chrome-Extension.git
+git clone https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension.git
 cd Bookmark-Organizer-Chrome-Extension/frontend
 npm install
 npm run build
@@ -60,19 +60,19 @@ npm run build
 
 ## 🔑 Getting Started
 
-1. Create a free API key at [openrouter.ai](https://openrouter.ai/) (`sk-or-...`).
-2. Click the extension icon to open the side panel and paste your key — it is stored locally in your browser and never leaves it except to authenticate with OpenRouter.
+1. Create a free API key at [Google AI Studio](https://aistudio.google.com/app/apikey) (`AIza...`) or [OpenRouter](https://openrouter.ai/) (`sk-or-...`).
+2. Click the extension icon to open the side panel and paste your key. The extension detects its provider automatically; it is stored locally in your browser and only sent to that provider for authentication.
 3. Pick a model, tune your categories and subfolder granularity (optional), and hit **Organize My Bookmarks**.
 
 ## 🔒 Privacy
 
-We do not collect data. Your API key is stored locally in your browser. Bookmark titles and URLs are sent directly to the OpenRouter API for categorization and immediately discarded — there is no middleman server.
+We do not collect data. Your API key is stored locally in your browser. Bookmark titles and URLs are sent directly to Google AI Studio or OpenRouter for categorization and immediately discarded — there is no middleman server.
 [Read our Privacy Policy](docs/privacy.html)
 
 ## 🛠️ Tech Stack
 
 - **Frontend**: React 19 + Vite, rendered in Chrome's Side Panel
-- **AI**: Google Gemini models via the OpenRouter API
+- **AI**: Google Gemini models via Google AI Studio or the OpenRouter API
 - **Extension**: Manifest V3 (`storage`, `bookmarks`, `downloads`, `sidePanel` permissions)
 
 ## License

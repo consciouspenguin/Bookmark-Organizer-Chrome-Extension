@@ -85,6 +85,107 @@ function parseModelResponse(data) {
     }
 }
 
+// The same single API-key field accepts keys from either provider. Google AI
+// Studio keys start with "AIza"; everything else (OpenRouter "sk-or-...",
+// OpenAI-style "sk-...") is treated as OpenRouter.
+export function detectProvider(apiKey) {
+    return (apiKey || '').trim().startsWith('AIza') ? 'gemini' : 'openrouter';
+}
+
+// Model ids in the UI are OpenRouter-namespaced ("google/gemini-3.1-flash-lite").
+// The native Gemini API wants the bare id ("gemini-3.1-flash-lite").
+function geminiModelId(model) {
+    return model.replace(/^google\//, '');
+}
+
+// Validate a native Gemini generateContent response and extract its JSON
+// payload, mirroring parseModelResponse: name the actual failure and mark it
+// retryable so a fresh generation can succeed.
+function parseGeminiResponse(data) {
+    if (data.promptFeedback?.blockReason) {
+        const error = new Error(`Gemini blocked the request (${data.promptFeedback.blockReason})`);
+        throw error; // safety blocks are not transient — do not retry
+    }
+
+    const candidate = data.candidates?.[0];
+    const content = candidate?.content?.parts?.map(p => p.text).filter(Boolean).join('');
+
+    if (!content) {
+        const error = new Error("model returned an empty response");
+        error.retryable = true;
+        throw error;
+    }
+
+    if (candidate.finishReason === 'MAX_TOKENS') {
+        const error = new Error("model response was cut off at the max output token limit");
+        error.retryable = true;
+        throw error;
+    }
+
+    try {
+        return extractJson(content);
+    } catch (parseErr) {
+        const error = new Error(`model returned invalid JSON (${parseErr.message})`);
+        error.retryable = true;
+        throw error;
+    }
+}
+
+// Single model call routed to the right provider by key prefix. Returns the
+// parsed JSON object. Throws errors tagged with statusCode/retryable so the
+// shared withRetry wrapper can decide whether to back off and try again.
+async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens }) {
+    if (detectProvider(apiKey) === 'gemini') {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModelId(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                system_instruction: { parts: [{ text: systemContent }] },
+                contents: [{ role: "user", parts: [{ text: userContent }] }],
+                generationConfig: {
+                    temperature,
+                    maxOutputTokens: maxTokens,
+                    responseMimeType: "application/json"
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            const error = new Error(`API Error: ${response.status} - ${errorText}`);
+            error.statusCode = response.status;
+            throw error;
+        }
+
+        return parseGeminiResponse(await response.json());
+    }
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: OR_HEADERS(apiKey),
+        body: JSON.stringify({
+            model,
+            temperature,
+            max_tokens: maxTokens,
+            messages: [
+                { role: "system", content: systemContent },
+                { role: "user", content: userContent }
+            ],
+            response_format: { type: "json_object" }
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        const error = new Error(`API Error: ${response.status} - ${errorText}`);
+        error.statusCode = response.status;
+        throw error;
+    }
+
+    return parseModelResponse(await response.json());
+}
+
 // Generic retry wrapper with exponential backoff
 async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000) {
     let lastError;
@@ -127,7 +228,7 @@ function sampleForSchema(bookmarks) {
     return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
-export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.5-flash", subfolderTarget = "5-10") {
+export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10") {
     const subfolderRules = {
         '0-5': 'aim for roughly 3-5 sub-folders inside each category. Keep it minimal — only create subfolders for truly distinct groups. Err on the side of combining related items into broader folders.',
         '5-10': 'aim for roughly 5-10 sub-folders inside each category (about 7-8 is the sweet spot). Enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
@@ -181,35 +282,14 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
     ${JSON.stringify(schemaSource.map(b => ({ title: b.title, url: b.url })))}
     `;
 
-    return await withRetry(async () => {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: OR_HEADERS(apiKey),
-            body: JSON.stringify({
-                model: model,
-                temperature: 0.2,
-                max_tokens: 8000,
-                messages: [
-                    { role: "system", content: "You are an expert information architect and precise JSON generator. Output only valid JSON. Do not use Markdown blocks." },
-                    { role: "user", content: prompt }
-                ],
-                response_format: { type: "json_object" }
-            })
-        });
+    const systemContent = "You are an expert information architect and precise JSON generator. Output only valid JSON. Do not use Markdown blocks.";
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            const error = new Error(`API Error: ${response.status} - ${errorText}`);
-            error.statusCode = response.status;
-            throw error;
-        }
-
-        const data = await response.json();
-        return parseModelResponse(data);
-    });
+    return await withRetry(() =>
+        callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 })
+    );
 }
 
-export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.5-flash") {
+export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite") {
     const prompt = `
     Classify these ${bookmarks.length} bookmarks into the fixed folder structure below.
 
@@ -229,31 +309,10 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
     ${JSON.stringify(bookmarks.map((b, i) => ({ i, title: b.title, url: b.url })))}
     `;
 
+    const systemContent = "You are a precise classification engine and JSON generator. Output only valid JSON. Do not use Markdown blocks.";
+
     return await withRetry(async () => {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: OR_HEADERS(apiKey),
-            body: JSON.stringify({
-                model: model,
-                temperature: 0.1,
-                max_tokens: 8000,
-                messages: [
-                    { role: "system", content: "You are a precise classification engine and JSON generator. Output only valid JSON. Do not use Markdown blocks." },
-                    { role: "user", content: prompt }
-                ],
-                response_format: { type: "json_object" }
-            })
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            const error = new Error(`API Error: ${response.status} - ${errorText}`);
-            error.statusCode = response.status;
-            throw error;
-        }
-
-        const data = await response.json();
-        const parsed = parseModelResponse(data);
+        const parsed = await callModel(apiKey, model, systemContent, prompt, { temperature: 0.1, maxTokens: 8000 });
 
         // Join the model's index-only answers back to the source bookmarks.
         // Titles and urls come from OUR data, never from model output — the

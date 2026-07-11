@@ -73,10 +73,11 @@
   --terminal-muted: #6f7c90;
 }
 
-/* Smooth theme transition for color-bearing properties only */
+/* Global box sizing reset & smooth theme transition */
 *,
 *::before,
 *::after {
+  box-sizing: border-box;
   transition: background-color 0.25s ease, border-color 0.25s ease, color 0.2s ease;
 }
 
