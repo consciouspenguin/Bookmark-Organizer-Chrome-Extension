@@ -1,11 +1,7 @@
 {
     "manifest_version": 3,
     "name": "AI Bookmark Organizer",
-<<<<<<< HEAD
     "version": "1.1.2",
-=======
-    "version": "1.1.1",
->>>>>>> origin/main
     "description": "Organize your bookmarks using AI with Google Gemini.",
     "permissions": [
         "storage",

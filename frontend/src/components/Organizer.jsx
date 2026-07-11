@@ -1,9 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-<<<<<<< HEAD
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Download } from 'lucide-react'
-=======
 import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download } from 'lucide-react'
->>>>>>> origin/main
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -61,27 +57,15 @@ export default function Organizer() {
     const logContainerRef = useRef(null)
     const organizerRef = useRef(null)
 
-    // Last organized run, available for download even after the panel was
-    // closed: metadata lives in state, the full results in chrome.storage.
-    const [lastOrganized, setLastOrganized] = useState(null) // { count, savedAt }
-    const organizedResultsRef = useRef(null)
-
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-<<<<<<< HEAD
             chrome.storage.local.get(['apiKey', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.selectedModel) setSelectedModel(result.selectedModel)
                 if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
                 if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
-=======
-            chrome.storage.local.get(['apiKey', 'selectedModel', 'subfolderTarget', 'organizedMeta'], (result) => {
-                if (result.apiKey) setApiKey(result.apiKey)
-                if (result.selectedModel) setSelectedModel(result.selectedModel)
-                if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
->>>>>>> origin/main
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
         }
@@ -191,24 +175,6 @@ export default function Organizer() {
         }
     }, [])
 
-    const downloadOrganized = useCallback(() => {
-        if (organizedResultsRef.current) {
-            downloadBookmarks(organizedResultsRef.current)
-            return
-        }
-        if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['organizedData'], (result) => {
-                if (result.organizedData && result.organizedData.length > 0) {
-                    organizedResultsRef.current = result.organizedData
-                    downloadBookmarks(result.organizedData)
-                } else {
-                    setErrorMsg('No saved organized bookmarks found.')
-                    setLastOrganized(null)
-                }
-            })
-        }
-    }, [])
-
     const resetApp = useCallback(() => {
         setStatus('idle')
         setLogs([])
@@ -232,13 +198,9 @@ export default function Organizer() {
             setLogs([
                 { message: 'Starting AI Organization...', timestamp: new Date() },
                 { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
-<<<<<<< HEAD
                 { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
                 { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
                 { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() }
-=======
-                { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() }
->>>>>>> origin/main
             ])
             setProgress(0)
             setErrorMsg('')
@@ -248,32 +210,18 @@ export default function Organizer() {
                 categories,
                 (data) => {
                     if (data.status === 'info') {
-<<<<<<< HEAD
                         addLog(data.message)
                     } else if (data.status === 'progress') {
                         setProgress(data.percent)
                     } else if (data.status === 'warning') {
                         addLog(data.message)
-=======
-                        addLog(`${data.message}`)
-                    } else if (data.status === 'progress') {
-                        setProgress(data.percent)
-                    } else if (data.status === 'warning') {
-                        addLog(`${data.message}`)
->>>>>>> origin/main
                     } else if (data.status === 'error') {
                         setErrorMsg(data.message)
                         setStatus('error')
                     } else if (data.status === 'success') {
-<<<<<<< HEAD
                         addLog(data.message)
                     } else if (data.status === 'done') {
                         addLog(data.message)
-=======
-                        addLog(`${data.message}`)
-                    } else if (data.status === 'done') {
-                        addLog(`${data.message}`)
->>>>>>> origin/main
                         setStatus('complete')
                         setProgress(100)
                     }
@@ -340,22 +288,13 @@ export default function Organizer() {
                 />
 
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'var(--surface-alt)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
-<<<<<<< HEAD
-                    <div style={{ marginBottom: '0.25rem' }}>
-=======
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
                         <Lock size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
->>>>>>> origin/main
                         <span>Your API key is stored locally in your browser.</span>
                     </div>
                 </div>
 
                 <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-<<<<<<< HEAD
-                    <p style={{ margin: 0 }}>
-                        Powered by <strong>Google Gemini</strong> via OpenRouter.
-                        Choose your preferred model for optimal performance.
-=======
                     <p style={{ margin: 0, display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
                         <Zap size={14} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: '2px' }} />
                         <span>
@@ -364,7 +303,6 @@ export default function Organizer() {
                             <strong>OpenRouter</strong> (<code>sk-or-</code>) — the provider is detected
                             automatically{apiKey ? `: ${provider === 'gemini' ? 'Google AI Studio' : 'OpenRouter'}` : ''}.
                         </span>
->>>>>>> origin/main
                     </p>
                 </div>
             </div>
@@ -439,7 +377,6 @@ export default function Organizer() {
                 </div>
             )}
 
-<<<<<<< HEAD
             {/* Alphabetical Sorting Toggle */}
             {status === 'idle' && (
                 <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -522,19 +459,6 @@ export default function Organizer() {
                             transition: 'left 0.2s ease'
                         }} />
                     </button>
-=======
-            {/* Alphabetic Sorting */}
-            {status === 'idle' && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                    <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                        Alphabetic Sorting
-                    </label>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={() => {}} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', background: 'var(--accent-gradient)', color: 'var(--on-accent)', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '600', transition: 'all 0.2s' }}>Enabled</button>
-                        <button onClick={() => {}} style={{ flex: 1, padding: '0.6rem', borderRadius: '6px', border: 'none', background: 'var(--surface-solid)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem', transition: 'all 0.2s' }}>Disabled</button>
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Bookmarks will be sorted alphabetically</div>
->>>>>>> origin/main
                 </div>
             )}
 
@@ -691,12 +615,8 @@ export default function Organizer() {
                     marginBottom: '2rem',
                     background: 'var(--surface-alt)',
                     border: '1px solid var(--border)',
-<<<<<<< HEAD
-                    borderRadius: '8px'
-=======
                     borderRadius: '8px',
                     boxSizing: 'border-box'
->>>>>>> origin/main
                 }}>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                         Last run: {lastOrganized.count.toLocaleString()} bookmarks organized
