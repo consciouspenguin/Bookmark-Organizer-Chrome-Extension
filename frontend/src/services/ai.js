@@ -40,6 +40,49 @@ function extractJson(content) {
     }
 }
 
+// Short, human-readable label for common HTTP status codes so the log/UI
+// says what actually went wrong instead of echoing a provider error blob.
+const STATUS_LABELS = {
+    400: "bad request (the model may have rejected the prompt)",
+    401: "invalid or missing API key",
+    402: "insufficient credits on your account",
+    403: "access denied for this API key or model",
+    404: "model not found",
+    408: "the request timed out",
+    413: "request too large — try a smaller batch",
+    429: "rate limited — too many requests",
+    500: "provider server error",
+    502: "provider is unavailable (bad gateway)",
+    503: "provider is temporarily overloaded",
+    504: "provider timed out (gateway timeout)"
+};
+
+// Turn a raw API error response into one concise sentence. Providers return a
+// full JSON body (OpenRouter and Gemini both nest the useful text under
+// `error.message`); dumping the whole thing floods the terminal, so we pull
+// out just the message and pair it with a friendly status label.
+function summarizeApiError(status, errorText) {
+    const label = STATUS_LABELS[status] || `request failed (HTTP ${status})`;
+
+    let detail = "";
+    try {
+        const body = JSON.parse(errorText);
+        detail = body?.error?.message || body?.message || "";
+    } catch {
+        // Not JSON (e.g. an HTML gateway page) — fall back to the raw text.
+        detail = (errorText || "").trim();
+    }
+
+    // Collapse whitespace and cap the length so a stray verbose message can't
+    // recreate the exact "wall of JSON" problem we're fixing.
+    detail = detail.replace(/\s+/g, " ").trim();
+    if (detail.length > 160) detail = detail.slice(0, 157) + "…";
+
+    const error = new Error(detail ? `${label} — ${detail}` : label);
+    error.statusCode = status;
+    return error;
+}
+
 // Determine if an error is retryable (transient) vs permanent
 function isRetryableError(error, statusCode) {
     // Explicitly flagged (e.g. malformed/truncated model output): the request
@@ -152,10 +195,7 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            const error = new Error(`API Error: ${response.status} - ${errorText}`);
-            error.statusCode = response.status;
-            throw error;
+            throw summarizeApiError(response.status, await response.text());
         }
 
         return parseGeminiResponse(await response.json());
@@ -177,10 +217,7 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
     });
 
     if (!response.ok) {
-        const errorText = await response.text();
-        const error = new Error(`API Error: ${response.status} - ${errorText}`);
-        error.statusCode = response.status;
-        throw error;
+        throw summarizeApiError(response.status, await response.text());
     }
 
     return parseModelResponse(await response.json());
