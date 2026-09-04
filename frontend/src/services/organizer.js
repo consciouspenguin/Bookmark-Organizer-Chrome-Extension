@@ -127,7 +127,11 @@ export class OrganizerService {
                 return [];
             }
 
-            if (batchData.length > 5) {
+            // Permanent errors (like 401 Unauthorized, 403 Forbidden, 404 Model Not Found)
+            // cannot be resolved by splitting the batch. Avoid pointless recursive subdivision.
+            const isPermanentApiError = [401, 403, 404].includes(err?.statusCode);
+
+            if (batchData.length > 5 && !isPermanentApiError) {
                 const mid = Math.ceil(batchData.length / 2);
                 this.onProgress({
                     status: 'info',

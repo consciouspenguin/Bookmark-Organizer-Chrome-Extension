@@ -148,8 +148,13 @@ export function detectProvider(apiKey) {
 
 // Model ids in the UI are OpenRouter-namespaced ("google/gemini-3.1-flash-lite").
 // The native Gemini API wants the bare id ("gemini-3.1-flash-lite").
-function geminiModelId(model) {
-    return model.replace(/^google\//, '');
+export function geminiModelId(model) {
+    const bare = model.replace(/^google\//, '');
+    // Google AI Studio deprecated gemini-2.5-pro for new users in favor of gemini-3.1-pro-preview
+    if (bare === 'gemini-2.5-pro') {
+        return 'gemini-3.1-pro-preview';
+    }
+    return bare;
 }
 
 // Validate a native Gemini generateContent response and extract its JSON

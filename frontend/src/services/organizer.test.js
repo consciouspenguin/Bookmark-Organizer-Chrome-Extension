@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService } from './organizer'
 import * as ai from './ai'
-import { classifyBatch, generateSchema, withRetry } from './ai'
+import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 
 describe('removeDuplicateUrls', () => {
@@ -741,5 +741,51 @@ describe('OrganizerService resilient batch processing and sub-batch subdivision'
             message: 'Network issue on batch 1. Retrying in 3s...'
         })
     })
+
+    it('does not recursively subdivide on permanent HTTP 404/401/403 errors', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const notFoundError = new Error('model not found — models/gemini-2.5-pro is no longer available')
+        notFoundError.statusCode = 404
+
+        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(notFoundError)
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // It should NOT attempt to split 20 -> 10 -> 5
+        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
+        expect(results).toHaveLength(20)
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+    })
 })
+
+describe('geminiModelId provider mapping and legacy model aliasing', () => {
+    it('strips google/ prefix from standard model names', () => {
+        expect(geminiModelId('google/gemini-3.1-flash-lite')).toBe('gemini-3.1-flash-lite')
+        expect(geminiModelId('google/gemini-3.8-flash')).toBe('gemini-3.8-flash')
+        expect(geminiModelId('google/gemini-3.1-pro-preview')).toBe('gemini-3.1-pro-preview')
+    })
+
+    it('aliases deprecated gemini-2.5-pro to gemini-3.1-pro-preview', () => {
+        expect(geminiModelId('google/gemini-2.5-pro')).toBe('gemini-3.1-pro-preview')
+        expect(geminiModelId('gemini-2.5-pro')).toBe('gemini-3.1-pro-preview')
+    })
+})
+
 

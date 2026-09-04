@@ -37,11 +37,11 @@ export default function Organizer() {
             description: '3.8 Flash: Highest taxonomy accuracy with fast response times.'
         },
         {
-            id: 'google/gemini-2.5-pro',
-            name: '2.5 Pro',
+            id: 'google/gemini-3.1-pro-preview',
+            name: '3.1 Pro',
             badge: 'Deep Reasoning',
-            label: '2.5 Pro (Deep Reasoning)',
-            description: '2.5 Pro: Deepest reasoning model for intricate or ambiguous bookmark hierarchies.'
+            label: '3.1 Pro (Deep Reasoning)',
+            description: '3.1 Pro: Deepest reasoning model for intricate or ambiguous bookmark hierarchies.'
         }
     ], [])
 
@@ -84,7 +84,10 @@ export default function Organizer() {
         if (typeof chrome !== 'undefined' && chrome.storage) {
             chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
-                if (result.selectedModel && ['google/gemini-3.1-flash-lite', 'google/gemini-3.8-flash', 'google/gemini-2.5-pro'].includes(result.selectedModel)) {
+                if (result.selectedModel === 'google/gemini-2.5-pro') {
+                    setSelectedModel('google/gemini-3.1-pro-preview')
+                    chrome.storage.local.set({ selectedModel: 'google/gemini-3.1-pro-preview' })
+                } else if (result.selectedModel && ['google/gemini-3.1-flash-lite', 'google/gemini-3.8-flash', 'google/gemini-3.1-pro-preview'].includes(result.selectedModel)) {
                     setSelectedModel(result.selectedModel)
                 } else {
                     setSelectedModel('google/gemini-3.1-flash-lite')
