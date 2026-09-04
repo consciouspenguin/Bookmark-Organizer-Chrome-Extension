@@ -679,7 +679,10 @@ export default function Organizer() {
                                     <Zap size={14} style={{ color: 'var(--accent)' }} />
                                     <span>How This Mode Works</span>
                                 </div>
-                                Bypasses folder creation and AI categorization. All bookmarks are compiled into a clean, flat sequential file ordered strictly by timestamp.
+                                Bypasses folder creation and AI categorization (0 tokens used). All bookmarks are compiled into a clean, flat sequential file ordered strictly by timestamp.
+                                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.4rem', paddingTop: '0.4rem', borderTop: '1px dashed var(--border)', lineHeight: '1.4' }}>
+                                    ⚡ <strong>Token Note:</strong> Leaving &ldquo;Clean Titles with AI&rdquo; below off uses <strong>0 AI tokens</strong> (100% free &amp; offline). Toggling it on consumes AI tokens to rewrite bookmark titles.
+                                </div>
                             </div>
 
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '600' }}>
@@ -869,11 +872,28 @@ export default function Organizer() {
             {status === 'idle' && (
                 <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
                     <div>
-                        <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                            Clean Titles with AI
-                        </label>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                            {flatDateSort ? 'Rewrites messy or truncated titles using AI (requires API key) while preserving chronological date order' : 'Rewrites messy or truncated titles'}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '600' }}>
+                                Clean Titles with AI
+                            </label>
+                            <span style={{
+                                fontSize: '0.68rem',
+                                padding: '0.12rem 0.45rem',
+                                borderRadius: '10px',
+                                background: cleanTitles ? 'var(--accent-soft)' : 'var(--surface-solid)',
+                                border: '1px solid var(--border)',
+                                color: cleanTitles ? 'var(--accent)' : 'var(--text-muted)',
+                                fontWeight: 600,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.3px'
+                            }}>
+                                Consumes AI Tokens
+                            </span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: '1.4' }}>
+                            {flatDateSort
+                                ? 'Uses AI to rewrite cryptic, truncated, or raw-URL titles into clean names while preserving chronological date order. Consumes AI tokens and requires an API key.'
+                                : 'Uses AI to rewrite messy, truncated, or raw-URL titles into human-readable names. Consumes AI tokens.'}
                         </div>
                     </div>
                     <button
