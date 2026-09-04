@@ -222,7 +222,7 @@ describe('OrganizerService cleanTitles integration', () => {
             expect.arrayContaining([expect.objectContaining({ url: 'https://example.com' })]),
             'test-key',
             expect.any(Object),
-            'google/gemini-3.1-flash-lite',
+            'google/gemini-3.8-flash',
             false
         )
 

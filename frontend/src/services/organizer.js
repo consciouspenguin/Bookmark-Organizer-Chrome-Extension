@@ -78,7 +78,7 @@ export function removeDuplicateUrls(bookmarks) {
 }
 
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false) {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.8-flash", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false) {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });

@@ -19,13 +19,43 @@ export default function Organizer() {
     const provider = useMemo(() => detectProvider(apiKey), [apiKey])
 
     // Model Selection — Gemini Flash & Flash-Lite models (OpenRouter + Google AI Studio)
-    const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
+    const [selectedModel, setSelectedModel] = useState('google/gemini-3.8-flash')
     const models = useMemo(() => [
-        { id: 'google/gemini-3.1-flash-lite', label: '3.1 Flash Lite (Fast & Cheap)' },
-        { id: 'google/gemini-3.8-flash', label: '3.8 Flash (Recommended)' },
-        { id: 'google/gemini-3.7-flash', label: '3.7 Flash' },
-        { id: 'google/gemini-2.5-flash', label: '2.5 Flash' },
-        { id: 'google/gemini-2.5-pro', label: '2.5 Pro' }
+        {
+            id: 'google/gemini-3.8-flash',
+            name: '3.8 Flash',
+            badge: 'Recommended',
+            label: '3.8 Flash (Recommended)',
+            description: '3.8 Flash: Recommended default — highest accuracy and speed for categorization.'
+        },
+        {
+            id: 'google/gemini-3.1-flash-lite',
+            name: '3.1 Flash Lite',
+            badge: 'Fast & Cheap',
+            label: '3.1 Flash Lite (Fast & Cheap)',
+            description: '3.1 Flash Lite: Ultra-fast and lowest token cost for large bookmark collections.'
+        },
+        {
+            id: 'google/gemini-3.7-flash',
+            name: '3.7 Flash',
+            badge: '',
+            label: '3.7 Flash',
+            description: '3.7 Flash: Advanced hybrid reasoning model with strong taxonomy performance.'
+        },
+        {
+            id: 'google/gemini-2.5-flash',
+            name: '2.5 Flash',
+            badge: '',
+            label: '2.5 Flash',
+            description: '2.5 Flash: Reliable, fast, and stable standard Flash model.'
+        },
+        {
+            id: 'google/gemini-2.5-pro',
+            name: '2.5 Pro',
+            badge: '',
+            label: '2.5 Pro',
+            description: '2.5 Pro: Deepest reasoning model for complex or ambiguous bookmark trees.'
+        }
     ], [])
 
     const [categories, setCategories] = useState([
@@ -334,31 +364,48 @@ export default function Organizer() {
                     <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
                         Select AI Model
                     </label>
-                    <div style={{ display: 'flex', gap: '0.5rem', padding: '0.4rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', padding: '0.4rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                         {models.map((model) => (
                             <button
                                 key={model.id}
                                 onClick={() => handleModelChange(model.id)}
                                 style={{
-                                    flex: 1,
-                                    padding: '0.6rem 0.8rem',
+                                    flex: '1 1 85px',
+                                    minWidth: '70px',
+                                    padding: '0.6rem 0.4rem',
                                     borderRadius: '6px',
                                     border: 'none',
                                     background: selectedModel === model.id ? 'var(--accent-gradient)' : 'transparent',
                                     color: selectedModel === model.id ? 'var(--on-accent)' : 'var(--text-secondary)',
                                     cursor: 'pointer',
-                                    fontSize: '0.85rem',
+                                    fontSize: '0.82rem',
                                     fontWeight: selectedModel === model.id ? '600' : '500',
                                     transition: 'all 0.2s ease',
-                                    boxShadow: selectedModel === model.id ? '0 1px 10px var(--accent-glow)' : 'none'
+                                    boxShadow: selectedModel === model.id ? '0 1px 10px var(--accent-glow)' : 'none',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '2px',
+                                    textAlign: 'center'
                                 }}
                             >
-                                {model.label}
+                                <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{model.name}</span>
+                                {model.badge && (
+                                    <span style={{
+                                        fontSize: '0.68rem',
+                                        opacity: selectedModel === model.id ? 0.95 : 0.75,
+                                        fontWeight: 400,
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        ({model.badge})
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-                        3.5 Flash: best accuracy. 2.5 Flash: faster & efficient. 3.1 Lite: lightweight option.
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', lineHeight: '1.4' }}>
+                        {models.find(m => m.id === selectedModel)?.description || '3.8 Flash: Recommended default — highest accuracy and speed for categorization.'}
                     </div>
                 </div>
             )}

@@ -300,7 +300,7 @@ function sampleForSchema(bookmarks) {
     return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
-export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", onRetry = null) {
+export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.8-flash", subfolderTarget = "5-10", onRetry = null) {
     const subfolderRules = {
         '0-5': 'aim for roughly 3-5 sub-folders inside each category. Keep it minimal — only create subfolders for truly distinct groups. Err on the side of combining related items into broader folders.',
         '5-10': 'aim for roughly 5-10 sub-folders inside each category (about 7-8 is the sweet spot). Enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
@@ -364,7 +364,7 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
     );
 }
 
-export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", cleanTitles = false, onRetry = null) {
+export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.8-flash", cleanTitles = false, onRetry = null) {
     const titleInstruction = cleanTitles
         ? `\n    6. Title cleanup: If clean_title is requested, provide a cleaned, human-readable title in the 'clean_title' field for each bookmark (strip site prefixes/suffixes like 'Login |', '- Wikipedia', query noise, or convert raw URL titles into clean titles). If the existing title is already clean, keep it as is.`
         : '';
