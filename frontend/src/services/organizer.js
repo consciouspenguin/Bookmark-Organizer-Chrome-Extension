@@ -2,6 +2,70 @@ import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, sho
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 
+// Fast reachability probe for URLs using no-cors and an aggressive timeout.
+// Resolves true for reachable or indeterminate hosts; returns false only on DNS/network failure or timeout.
+export async function checkUrlReachable(url, timeoutMs = 2500) {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) return false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("check timeout")), timeoutMs);
+    try {
+        await fetch(url, { method: 'HEAD', mode: 'no-cors', signal: controller.signal });
+        return true;
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Concurrently probes bookmark URLs in parallel chunks so verification completes in seconds.
+// Dead/unreachable links are segregated to Archive -> Broken Links to bypass AI classification.
+export async function filterReachableBookmarks(bookmarks, onProgress, isCancelled) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return { activeLinks: bookmarks, deadLinks: [] };
+    }
+
+    const activeLinks = [];
+    const deadLinks = [];
+    const total = bookmarks.length;
+    let completed = 0;
+
+    const concurrency = 15;
+    let currentIndex = 0;
+
+    const worker = async () => {
+        while (currentIndex < total && !isCancelled()) {
+            const idx = currentIndex++;
+            const item = bookmarks[idx];
+            const isReachable = await checkUrlReachable(item.url);
+            if (isReachable) {
+                activeLinks.push(item);
+            } else {
+                deadLinks.push({
+                    ...item,
+                    category: 'Archive',
+                    sub_category: 'Broken Links'
+                });
+            }
+            completed++;
+            if (completed % 25 === 0 || completed === total) {
+                onProgress({
+                    status: 'info',
+                    message: `Checking link reachability: ${completed}/${total}...`
+                });
+            }
+        }
+    };
+
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, total); i++) {
+        workers.push(worker());
+    }
+    await Promise.all(workers);
+
+    return { activeLinks, deadLinks };
+}
+
 // Preserve the first occurrence so the output stays deterministic and never
 // writes more than one bookmark for an exact duplicate URL.
 export function removeDuplicateUrls(bookmarks) {
@@ -22,8 +86,14 @@ export class OrganizerService {
         this.subfolderTarget = subfolderTarget;
         this.sortAlphabetically = sortAlphabetically;
         this.removeDuplicates = removeDuplicates;
-        this.batchSize = 35;
+        this.batchSize = 50;
         this.isCancelled = false;
+        this.stats = {
+            total: 0,
+            duplicatesRemoved: 0,
+            deadLinksArchived: 0,
+            categoriesCount: 0
+        };
     }
 
     cancel() {
@@ -31,17 +101,14 @@ export class OrganizerService {
     }
 
     calculateAdaptiveBatchSize(totalBookmarks) {
-        const isLiteModel = this.model.includes('lite') || this.model.includes('flash-lite');
         const isProModel = this.model.includes('pro');
 
         if (totalBookmarks < 50) {
-            return isLiteModel ? 15 : 20;
+            return isProModel ? 20 : 30;
         } else if (totalBookmarks < 200) {
-            return isLiteModel ? 20 : isProModel ? 25 : 35;
-        } else if (totalBookmarks < 500) {
-            return isLiteModel ? 25 : isProModel ? 30 : 45;
+            return isProModel ? 30 : 45;
         } else {
-            return isLiteModel ? 30 : isProModel ? 35 : 50;
+            return isProModel ? 40 : 50;
         }
     }
 
@@ -72,10 +139,11 @@ export class OrganizerService {
 
         this.onProgress({ status: 'info', message: `Found ${allLinks.length} bookmarks.` });
 
+        let duplicatesRemoved = 0;
         if (this.removeDuplicates) {
             const originalCount = allLinks.length;
             allLinks = removeDuplicateUrls(allLinks);
-            const duplicatesRemoved = originalCount - allLinks.length;
+            duplicatesRemoved = originalCount - allLinks.length;
             this.onProgress({
                 status: 'info',
                 message: duplicatesRemoved > 0
@@ -89,119 +157,133 @@ export class OrganizerService {
             return null;
         }
 
-        // --- Phase 1: Generate Schema ---
-        this.onProgress({ status: 'info', message: 'Analyzing bookmarks to generate a clean, non-redundant folder structure...' });
-        if (allLinks.length > SCHEMA_SAMPLE_LIMIT) {
-            this.onProgress({ status: 'info', message: `Large collection: designing the folder structure from a sample of ${SCHEMA_SAMPLE_LIMIT.toLocaleString()} of ${allLinks.length.toLocaleString()} bookmarks. All bookmarks will still be classified.` });
-        }
-
-        let schema;
-        try {
-            schema = await generateSchema(allLinks, this.apiKey, this.categories, this.model, this.subfolderTarget);
-            this.onProgress({ status: 'info', message: 'Generated category schema:' });
-            if (schema && schema.categories) {
-                schema.categories.forEach(cat => {
-                    const subCats = cat.sub_categories && cat.sub_categories.length > 0 
-                        ? ` (${cat.sub_categories.join(', ')})` 
-                        : '';
-                    this.onProgress({ status: 'info', message: `  • ${cat.name}${subCats}` });
-                });
-            }
-        } catch (err) {
-            console.error('Schema generation failed, falling back to basic categories:', err);
-            this.onProgress({ status: 'warning', message: `Schema generation failed after retries: ${err.message}. Using default categories (no subfolders).` });
-            schema = {
-                categories: this.categories.map(c => ({ name: c, sub_categories: [] }))
-            };
-        }
-
-        let rootFolder = null;
-        if (!fileBookmarks) {
-            this.onProgress({ status: 'info', message: 'Creating output directory...' });
-            const rootId = '2'; // 'Other Bookmarks' usually
-            rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
-        }
-
-        const total = allLinks.length;
-        let processed = 0;
-
-        const batchSize = this.calculateAdaptiveBatchSize(total);
-        this.onProgress({ status: 'info', message: `Processing with adaptive batch size: ${batchSize} items/batch` });
-
-        // Group into batches
-        const batches = [];
-        for (let i = 0; i < total; i += batchSize) {
-            batches.push({
-                index: batches.length,
-                batchData: allLinks.slice(i, i + batchSize)
-            });
-        }
-
-        const results = new Array(batches.length);
-        const failedBatches = [];
-        let batchIdx = 0;
-
-        const processNext = async () => {
-            if (batchIdx >= batches.length || this.isCancelled) return;
-            const currentIdx = batchIdx++;
-            const { index, batchData } = batches[currentIdx];
-
-            this.onProgress({
-                status: 'processing',
-                message: `Classifying batch ${currentIdx + 1}/${batches.length}...`,
-                percent: Math.round((processed / total) * 100)
-            });
-
-            try {
-                const classified = await classifyBatch(batchData, this.apiKey, schema, this.model);
-
-                // Accumulate results
-                results[index] = classified;
-                processed += batchData.length;
-                this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
-
-            } catch (err) {
-                console.error(`Batch ${currentIdx + 1} failed:`, err);
-                failedBatches.push({ index, batchData, label: currentIdx + 1 });
-                this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass.` });
-            }
-
-            await processNext();
-        };
-
-        // Run batches concurrently (limit to 3 concurrent requests to prevent rate limit issues)
-        const concurrencyLimit = 3;
-        const workers = [];
-        for (let w = 0; w < Math.min(concurrencyLimit, batches.length); w++) {
-            workers.push(processNext());
-        }
-        await Promise.all(workers);
-
-        // Second pass: retry failed batches one at a time, with no concurrent
-        // traffic competing — transient network drops usually clear by now.
-        // A batch that STILL fails gets filed under Other/General rather than
-        // dropped, so the output always contains every bookmark.
-        for (const { index, batchData, label } of failedBatches) {
-            if (this.isCancelled) break;
-
-            this.onProgress({ status: 'processing', message: `Retrying batch ${label}/${batches.length}...` });
-            try {
-                results[index] = await classifyBatch(batchData, this.apiKey, schema, this.model);
-            } catch (err) {
-                console.error(`Batch ${label} failed on second pass:`, err);
-                results[index] = batchData.map(b => ({ title: b.title, url: b.url, category: 'Other', sub_category: 'General' }));
-                this.onProgress({ status: 'warning', message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.` });
-            }
-            processed += batchData.length;
-            this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
-        }
+        // Fast link reachability check: isolate unreachable URLs so they bypass AI classification
+        this.onProgress({ status: 'info', message: 'Scanning link reachability...' });
+        const { activeLinks, deadLinks } = await filterReachableBookmarks(allLinks, this.onProgress, () => this.isCancelled);
 
         if (this.isCancelled) {
             this.onProgress({ status: 'warning', message: 'Process cancelled.' });
             return null;
         }
 
-        const finalResults = results.flat().filter(Boolean);
+        if (deadLinks.length > 0) {
+            this.onProgress({
+                status: 'info',
+                message: `Isolated ${deadLinks.length} unreachable bookmark${deadLinks.length === 1 ? '' : 's'} under Archive → Broken Links.`
+            });
+        }
+
+        let classifiedActive = [];
+
+        if (activeLinks.length > 0) {
+            // --- Phase 1: Generate Schema ---
+            this.onProgress({ status: 'info', message: 'Analyzing bookmarks to generate a clean, non-redundant folder structure...' });
+            if (activeLinks.length > SCHEMA_SAMPLE_LIMIT) {
+                this.onProgress({ status: 'info', message: `Large collection: designing the folder structure from a sample of ${SCHEMA_SAMPLE_LIMIT.toLocaleString()} of ${activeLinks.length.toLocaleString()} bookmarks. All bookmarks will still be classified.` });
+            }
+
+            let schema;
+            try {
+                schema = await generateSchema(activeLinks, this.apiKey, this.categories, this.model, this.subfolderTarget);
+                this.onProgress({ status: 'info', message: 'Generated category schema:' });
+                if (schema && schema.categories) {
+                    schema.categories.forEach(cat => {
+                        const subCats = cat.sub_categories && cat.sub_categories.length > 0 
+                            ? ` (${cat.sub_categories.join(', ')})` 
+                            : '';
+                        this.onProgress({ status: 'info', message: `  • ${cat.name}${subCats}` });
+                    });
+                }
+            } catch (err) {
+                console.error('Schema generation failed, falling back to basic categories:', err);
+                this.onProgress({ status: 'warning', message: `Schema generation failed after retries: ${err.message}. Using default categories (no subfolders).` });
+                schema = {
+                    categories: this.categories.map(c => ({ name: c, sub_categories: [] }))
+                };
+            }
+
+            const total = activeLinks.length;
+            let processed = 0;
+
+            const batchSize = this.calculateAdaptiveBatchSize(total);
+            this.onProgress({ status: 'info', message: `Processing with adaptive batch size: ${batchSize} items/batch` });
+
+            // Group into batches
+            const batches = [];
+            for (let i = 0; i < total; i += batchSize) {
+                batches.push({
+                    index: batches.length,
+                    batchData: activeLinks.slice(i, i + batchSize)
+                });
+            }
+
+            const results = new Array(batches.length);
+            const failedBatches = [];
+            let batchIdx = 0;
+
+            const processNext = async () => {
+                if (batchIdx >= batches.length || this.isCancelled) return;
+                const currentIdx = batchIdx++;
+                const { index, batchData } = batches[currentIdx];
+
+                this.onProgress({
+                    status: 'processing',
+                    message: `Classifying batch ${currentIdx + 1}/${batches.length}...`,
+                    percent: Math.round((processed / total) * 100)
+                });
+
+                try {
+                    const classified = await classifyBatch(batchData, this.apiKey, schema, this.model);
+
+                    // Accumulate results
+                    results[index] = classified;
+                    processed += batchData.length;
+                    this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
+
+                } catch (err) {
+                    console.error(`Batch ${currentIdx + 1} failed:`, err);
+                    failedBatches.push({ index, batchData, label: currentIdx + 1 });
+                    this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass.` });
+                }
+
+                await processNext();
+            };
+
+            // Run batches concurrently (increased to 4 concurrent requests for optimal throughput)
+            const concurrencyLimit = 4;
+            const workers = [];
+            for (let w = 0; w < Math.min(concurrencyLimit, batches.length); w++) {
+                workers.push(processNext());
+            }
+            await Promise.all(workers);
+
+            // Second pass: retry failed batches one at a time, with no concurrent
+            // traffic competing — transient network drops usually clear by now.
+            for (const { index, batchData, label } of failedBatches) {
+                if (this.isCancelled) break;
+
+                this.onProgress({ status: 'processing', message: `Retrying batch ${label}/${batches.length}...` });
+                try {
+                    results[index] = await classifyBatch(batchData, this.apiKey, schema, this.model);
+                } catch (err) {
+                    console.error(`Batch ${label} failed on second pass:`, err);
+                    results[index] = batchData.map(b => ({ title: b.title, url: b.url, category: 'Other', sub_category: 'General' }));
+                    this.onProgress({ status: 'warning', message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.` });
+                }
+                processed += batchData.length;
+                this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
+            }
+
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
+            }
+
+            classifiedActive = results.flat().filter(Boolean);
+        }
+
+        // Combine classified reachable links with archived unreachable links
+        const finalResults = [...classifiedActive, ...deadLinks];
 
         // Creation order determines display order in Chrome, so sorting the
         // results here alphabetizes the folders and the bookmarks within them.
@@ -217,14 +299,18 @@ export class OrganizerService {
             this.onProgress({ status: 'info', message: 'Generating organized file...' });
             downloadBookmarks(finalResults);
         } else {
-            // Browser mode: Save all sequentially at the end
+            // Browser mode: Save bookmarks to Chrome
             this.onProgress({ status: 'info', message: `Saving ${finalResults.length} bookmarks to browser...` });
             
+            const rootId = '2'; // 'Other Bookmarks' usually
+            const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
+
             // Clean up the folder cache before starting the write operation
             clearFolderCache();
 
             // To avoid duplicate folder creation and empty folders:
             const createdFolders = {}; // path key -> folder Object
+            const itemsWithParents = [];
 
             for (const item of finalResults) {
                 if (this.isCancelled) break;
@@ -255,7 +341,15 @@ export class OrganizerService {
                     targetParentId = subFolder.id;
                 }
                 
-                await createBookmark(targetParentId, item.title, item.url);
+                itemsWithParents.push({ parentId: targetParentId, title: item.title, url: item.url });
+            }
+
+            // High-speed pipelined creation in chunks of 15 promises
+            const WRITE_CHUNK_SIZE = 15;
+            for (let i = 0; i < itemsWithParents.length; i += WRITE_CHUNK_SIZE) {
+                if (this.isCancelled) break;
+                const chunk = itemsWithParents.slice(i, i + WRITE_CHUNK_SIZE);
+                await Promise.all(chunk.map(b => createBookmark(b.parentId, b.title, b.url)));
             }
         }
 
@@ -263,6 +357,15 @@ export class OrganizerService {
             this.onProgress({ status: 'warning', message: 'Process cancelled.' });
             return null;
         }
+
+        // Compute summary statistics
+        this.stats = {
+            total: finalResults.length,
+            duplicatesRemoved,
+            deadLinksArchived: deadLinks.length,
+            categoriesCount: new Set(finalResults.map(r => r.category)).size
+        };
+        finalResults.stats = this.stats;
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;

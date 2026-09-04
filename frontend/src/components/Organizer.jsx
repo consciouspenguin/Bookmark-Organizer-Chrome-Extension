@@ -238,7 +238,8 @@ export default function Organizer() {
 
             if (results && results.length > 0) {
                 organizedResultsRef.current = results
-                const meta = { count: results.length, savedAt: Date.now() }
+                const stats = organizerRef.current?.stats || results.stats || null
+                const meta = { count: results.length, savedAt: Date.now(), stats }
                 setLastOrganized(meta)
                 if (typeof chrome !== 'undefined' && chrome.storage) {
                     chrome.storage.local.set({ organizedData: results, organizedMeta: meta }, () => {
@@ -621,6 +622,8 @@ export default function Organizer() {
                 }}>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                         Last run: {lastOrganized.count.toLocaleString()} bookmarks organized
+                        {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
+                        {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
                         <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
                     </div>
                     <button
@@ -649,9 +652,37 @@ export default function Organizer() {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
                 {status === 'complete' ? (
                     <div style={{ textAlign: 'center' }}>
-                        <div style={{ marginBottom: '1rem', color: 'var(--success)', fontSize: '1.2rem', fontWeight: 'bold' }}>
+                        <div style={{ marginBottom: '0.75rem', color: 'var(--success)', fontSize: '1.2rem', fontWeight: 'bold' }}>
                             {uploadedFile ? "File Processed! Check your downloads." : 'All Done! Check your "AI Organized Bookmarks" folder.'}
                         </div>
+                        {lastOrganized?.stats && (
+                            <div style={{
+                                display: 'inline-flex',
+                                flexWrap: 'wrap',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.6rem',
+                                padding: '0.4rem 0.9rem',
+                                marginBottom: '1.25rem',
+                                borderRadius: '20px',
+                                background: 'var(--surface-alt)',
+                                border: '1px solid var(--border)',
+                                fontSize: '0.85rem',
+                                color: 'var(--text-secondary)'
+                            }}>
+                                <span><strong>{lastOrganized.stats.total.toLocaleString()}</strong> organized</span>
+                                <span>•</span>
+                                <span><strong>{lastOrganized.stats.duplicatesRemoved}</strong> duplicates</span>
+                                {lastOrganized.stats.deadLinksArchived > 0 && (
+                                    <>
+                                        <span>•</span>
+                                        <span><strong>{lastOrganized.stats.deadLinksArchived}</strong> dead archived</span>
+                                    </>
+                                )}
+                                <span>•</span>
+                                <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                            </div>
+                        )}
                         {lastOrganized && (
                             <div style={{ marginBottom: '1rem' }}>
                                 <button
