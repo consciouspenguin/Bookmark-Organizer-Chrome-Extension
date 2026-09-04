@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp } from './organizer'
 import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
 import * as bookmarksExport from './bookmarks_export'
+import * as bookmarksService from './bookmarks'
 
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
@@ -827,6 +828,253 @@ describe('geminiModelId provider mapping and legacy model aliasing', () => {
     it('aliases deprecated gemini-2.5-pro to gemini-3.1-pro-preview', () => {
         expect(geminiModelId('google/gemini-2.5-pro')).toBe('gemini-3.1-pro-preview')
         expect(geminiModelId('gemini-2.5-pro')).toBe('gemini-3.1-pro-preview')
+    })
+})
+
+describe('getBookmarkTimestamp', () => {
+    it('normalizes Netscape epoch seconds to milliseconds', () => {
+        expect(getBookmarkTimestamp({ add_date: '1609459200' })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ add_date: 1609459200 })).toBe(1609459200000)
+    })
+
+    it('preserves Chrome dateAdded milliseconds directly', () => {
+        expect(getBookmarkTimestamp({ dateAdded: 1609459200000 })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ dateAdded: '1609459200000' })).toBe(1609459200000)
+    })
+
+    it('returns 0 for missing, null, or invalid dates', () => {
+        expect(getBookmarkTimestamp(null)).toBe(0)
+        expect(getBookmarkTimestamp({})).toBe(0)
+        expect(getBookmarkTimestamp({ add_date: 'invalid' })).toBe(0)
+        expect(getBookmarkTimestamp({ dateAdded: null })).toBe(0)
+    })
+})
+
+describe('generateNetscapeHTML flat list generation', () => {
+    it('generates a single flat list without DT/H3 folder headers when bookmarks have no category or isFlat is true', () => {
+        const bookmarks = [
+            { title: 'Alpha', url: 'https://alpha.com', add_date: '1600000000' },
+            { title: 'Beta', url: 'https://beta.com', add_date: '1700000000' }
+        ]
+        bookmarks.isFlat = true
+
+        const html = bookmarksExport.generateNetscapeHTML(bookmarks)
+        expect(html).toContain('<TITLE>Bookmarks</TITLE>')
+        expect(html).not.toContain('<H3')
+        expect(html).toContain('<DT><A HREF="https://alpha.com" ADD_DATE="1600000000">Alpha</A>')
+        expect(html).toContain('<DT><A HREF="https://beta.com" ADD_DATE="1700000000">Beta</A>')
+    })
+})
+
+describe('OrganizerService flat chronological date sorting', () => {
+    let downloadSpy
+
+    beforeEach(() => {
+        downloadSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        downloadSpy.mockClear()
+    })
+
+    it('sorts bookmarks descending (newest first) and bypasses AI schema and classification', async () => {
+        const schemaSpy = vi.spyOn(ai, 'generateSchema')
+        const classifySpy = vi.spyOn(ai, 'classifyBatch')
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt.message) progressMessages.push(evt.message)
+        }
+
+        const bookmarks = [
+            { title: 'Oldest', url: 'https://oldest.com', add_date: '1500000000' },
+            { title: 'Newest', url: 'https://newest.com', add_date: '1700000000' },
+            { title: 'Middle', url: 'https://middle.com', add_date: '1600000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            onProgress,
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true, // sortAlphabetically
+            true, // removeDuplicates
+            false, // cleanTitles
+            true, // flatDateSort
+            'desc' // dateSortOrder (newest first)
+        )
+
+        const results = await service.start(bookmarks)
+
+        expect(schemaSpy).not.toHaveBeenCalled()
+        expect(classifySpy).not.toHaveBeenCalled()
+
+        expect(results.map(b => b.title)).toEqual(['Newest', 'Middle', 'Oldest'])
+        expect(results.isFlat).toBe(true)
+        expect(service.stats.isFlat).toBe(true)
+        expect(service.stats.categoriesCount).toBe(0)
+        expect(service.stats.categoryBreakdown).toEqual({})
+        expect(service.stats.dateSpan).toBeTruthy()
+        expect(progressMessages.some(m => m.includes('Sorting 3 bookmarks chronologically (Newest First)'))).toBe(true)
+        expect(bookmarksExport.downloadBookmarks).toHaveBeenCalledWith(results)
+    })
+
+    it('sorts bookmarks ascending (oldest first)', async () => {
+        const bookmarks = [
+            { title: 'Newest', url: 'https://newest.com', add_date: '1700000000' },
+            { title: 'Oldest', url: 'https://oldest.com', add_date: '1500000000' },
+            { title: 'Middle', url: 'https://middle.com', add_date: '1600000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            true, // flatDateSort
+            'asc' // dateSortOrder (oldest first)
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Oldest', 'Middle', 'Newest'])
+        expect(bookmarksExport.downloadBookmarks).toHaveBeenCalledWith(results)
+    })
+
+    it('cleans titles in flat mode when cleanTitles is enabled', async () => {
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
+            return batch.map(b => ({
+                ...b,
+                title: b.title.replace(' - Site', '')
+            }))
+        })
+
+        const bookmarks = [
+            { title: 'Old Article - Site', url: 'https://old.com', add_date: '1500000000' },
+            { title: 'New Article - Site', url: 'https://new.com', add_date: '1700000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            true, // cleanTitles enabled
+            true, // flatDateSort
+            'desc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['New Article', 'Old Article'])
+        expect(results.every(b => b.category === null)).toBe(true)
+        expect(bookmarksExport.downloadBookmarks).toHaveBeenCalledWith(results)
+    })
+
+    it('breaks timestamp ties alphabetically by title', async () => {
+        const bookmarks = [
+            { title: 'Zebra', url: 'https://zebra.com', add_date: '1600000000' },
+            { title: 'Apple', url: 'https://apple.com', add_date: '1600000000' },
+            { title: 'Mango', url: 'https://mango.com', add_date: '1600000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            true,
+            'desc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Apple', 'Mango', 'Zebra'])
+    })
+
+    it('removes duplicate URLs before chronological sorting when removeDuplicates is enabled', async () => {
+        const bookmarks = [
+            { title: 'First Copy', url: 'https://example.com', add_date: '1500000000' },
+            { title: 'Second Copy', url: 'https://example.com', add_date: '1700000000' },
+            { title: 'Unique Page', url: 'https://unique.com', add_date: '1600000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true, // removeDuplicates enabled
+            false,
+            true,
+            'desc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results).toHaveLength(2)
+        expect(service.stats.duplicatesRemoved).toBe(1)
+        expect(results.map(b => b.url)).toEqual(['https://unique.com', 'https://example.com'])
+    })
+
+    it('saves directly to a single chronological browser folder when in browser mode', async () => {
+        const browserTree = [
+            {
+                id: '1',
+                title: 'Bookmarks Bar',
+                children: [
+                    { id: '10', title: 'Older Link', url: 'https://older.com', dateAdded: 1500000000000 },
+                    { id: '11', title: 'Newer Link', url: 'https://newer.com', dateAdded: 1700000000000 }
+                ]
+            }
+        ]
+
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(browserTree)
+        const mockFolder = { id: 'chron-root-123', title: 'Chronological Bookmarks' }
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue(mockFolder)
+        const createdBookmarks = []
+        vi.spyOn(bookmarksService, 'createBookmark').mockImplementation(async (parentId, title, url) => {
+            createdBookmarks.push({ parentId, title, url })
+            return { id: `bm-${createdBookmarks.length}`, parentId, title, url }
+        })
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            true, // flatDateSort
+            'desc' // newest first
+        )
+
+        // Null fileBookmarks triggers browser mode
+        const results = await service.start(null)
+
+        expect(results.map(b => b.title)).toEqual(['Newer Link', 'Older Link'])
+        expect(bookmarksService.findOrCreateFolder).toHaveBeenCalledWith('2', expect.stringContaining('Chronological Bookmarks'))
+        expect(createdBookmarks).toHaveLength(2)
+        expect(createdBookmarks[0]).toEqual({
+            parentId: 'chron-root-123',
+            title: 'Newer Link',
+            url: 'https://newer.com'
+        })
+        expect(createdBookmarks[1]).toEqual({
+            parentId: 'chron-root-123',
+            title: 'Older Link',
+            url: 'https://older.com'
+        })
+        expect(bookmarksExport.downloadBookmarks).not.toHaveBeenCalled()
     })
 })
 

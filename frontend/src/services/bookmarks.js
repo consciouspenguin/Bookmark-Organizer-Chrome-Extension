@@ -101,30 +101,26 @@ export async function findOrCreateFolder(parentId, title) {
 }
 
 export async function organizeBookmarksResult(classifiedBookmarks) {
-    // 1. Create root "AI Organized" folder in "Other Bookmarks" (usually id '2' in Chrome, but we should find it)
-    // Actually, let's put it in the "Other Bookmarks" root if possible, or just under the root.
-    // '1' is usually Bookmarks Bar, '2' is Other Bookmarks.
-
+    const isFlat = Boolean(classifiedBookmarks?.isFlat) || (Array.isArray(classifiedBookmarks) && classifiedBookmarks.length > 0 && classifiedBookmarks.every(b => !b.category));
     const rootId = '2';
-    const aiRoot = await findOrCreateFolder(rootId, "AI Organized Bookmarks");
+    const folderTitle = isFlat ? "Chronological Bookmarks" : "AI Organized Bookmarks";
+    const targetRoot = await findOrCreateFolder(rootId, folderTitle);
 
-    // 2. Iterate and create structure
     for (const item of classifiedBookmarks) {
-        if (!item.category) continue;
-
         try {
-            const catFolder = await findOrCreateFolder(aiRoot.id, item.category);
-            let targetParentId = catFolder.id;
+            if (isFlat || !item.category) {
+                await createBookmark(targetRoot.id, item.title, item.url);
+            } else {
+                const catFolder = await findOrCreateFolder(targetRoot.id, item.category);
+                let targetParentId = catFolder.id;
 
-            if (item.sub_category) {
-                const subFolder = await findOrCreateFolder(catFolder.id, item.sub_category);
-                targetParentId = subFolder.id;
+                if (item.sub_category) {
+                    const subFolder = await findOrCreateFolder(catFolder.id, item.sub_category);
+                    targetParentId = subFolder.id;
+                }
+
+                await createBookmark(targetParentId, item.title, item.url);
             }
-
-            // We are creating NEW bookmarks here to avoid deleting the user's old ones for safety.
-            // In a real "organizer", you might move them, but copying is safer for v1.
-            await createBookmark(targetParentId, item.title, item.url);
-
         } catch (e) {
             console.error("Failed to create bookmark", item, e);
         }

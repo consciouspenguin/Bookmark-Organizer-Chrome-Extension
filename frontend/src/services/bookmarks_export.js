@@ -1,9 +1,17 @@
 // HTML escape function to prevent XSS
 function escapeHtml(text) {
     if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (typeof document !== 'undefined' && document.createElement) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // Embed a favicon only when it is a pure base64 image data URL: the strict
@@ -42,6 +50,21 @@ export function generateNetscapeHTML(bookmarks) {
 <DL><p>
 `;
 
+    const isFlat = Boolean(bookmarks?.isFlat) || (Array.isArray(bookmarks) && bookmarks.length > 0 && bookmarks.every(b => !b.category));
+
+    if (isFlat) {
+        bookmarks.forEach(item => {
+            const safeTitle = escapeHtml(item.title);
+            const safeUrl = sanitizeUrl(item.url);
+            const itemAddDate = item.add_date || (item.dateAdded ? Math.floor(item.dateAdded / 1000) : now);
+            if (safeUrl) {
+                html += `    <DT><A HREF="${safeUrl}" ADD_DATE="${itemAddDate}"${iconAttribute(item.icon)}>${safeTitle}</A>\n`;
+            }
+        });
+        html += `</DL><p>`;
+        return html;
+    }
+
     // Group by category and subcategory
     const structured = {};
 
@@ -73,8 +96,9 @@ export function generateNetscapeHTML(bookmarks) {
                 items.forEach(item => {
                     const safeTitle = escapeHtml(item.title);
                     const safeUrl = sanitizeUrl(item.url);
+                    const itemAddDate = item.add_date || (item.dateAdded ? Math.floor(item.dateAdded / 1000) : now);
                     if (safeUrl) {
-                        html += `            <DT><A HREF="${safeUrl}" ADD_DATE="${now}"${iconAttribute(item.icon)}>${safeTitle}</A>\n`;
+                        html += `            <DT><A HREF="${safeUrl}" ADD_DATE="${itemAddDate}"${iconAttribute(item.icon)}>${safeTitle}</A>\n`;
                     }
                 });
                 html += `        </DL><p>\n`;
@@ -86,8 +110,9 @@ export function generateNetscapeHTML(bookmarks) {
             content['_root'].forEach(item => {
                 const safeTitle = escapeHtml(item.title);
                 const safeUrl = sanitizeUrl(item.url);
+                const itemAddDate = item.add_date || (item.dateAdded ? Math.floor(item.dateAdded / 1000) : now);
                 if (safeUrl) {
-                    html += `        <DT><A HREF="${safeUrl}" ADD_DATE="${now}"${iconAttribute(item.icon)}>${safeTitle}</A>\n`;
+                    html += `        <DT><A HREF="${safeUrl}" ADD_DATE="${itemAddDate}"${iconAttribute(item.icon)}>${safeTitle}</A>\n`;
                 }
             });
         }
@@ -100,6 +125,8 @@ export function generateNetscapeHTML(bookmarks) {
 }
 
 export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.html") {
+    const defaultName = bookmarks?.isFlat ? "chronological_bookmarks.html" : "organized_bookmarks.html";
+    const actualFilename = filename === "organized_bookmarks.html" ? defaultName : filename;
     const html = generateNetscapeHTML(bookmarks);
     const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
@@ -107,14 +134,14 @@ export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.htm
     if (typeof chrome !== 'undefined' && chrome.downloads) {
         chrome.downloads.download({
             url: url,
-            filename: filename,
+            filename: actualFilename,
             saveAs: true
         });
     } else {
         // Fallback for non-extension environment or if permission missing
         const a = document.createElement('a');
         a.href = url;
-        a.download = filename;
+        a.download = actualFilename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

@@ -77,8 +77,31 @@ export function removeDuplicateUrls(bookmarks) {
     });
 }
 
+// Normalizes both Chrome API dateAdded (milliseconds) and Netscape add_date (seconds) to milliseconds
+export function getBookmarkTimestamp(bookmark) {
+    if (!bookmark) return 0;
+    // Chrome API dateAdded is epoch milliseconds
+    if (typeof bookmark.dateAdded === 'number' && !isNaN(bookmark.dateAdded) && bookmark.dateAdded > 0) {
+        return bookmark.dateAdded;
+    }
+    if (typeof bookmark.dateAdded === 'string' && /^\d+$/.test(bookmark.dateAdded.trim())) {
+        const num = Number(bookmark.dateAdded.trim());
+        if (num > 0) {
+            return num < 1e11 ? num * 1000 : num;
+        }
+    }
+    // Netscape HTML add_date is epoch seconds
+    if (bookmark.add_date) {
+        const num = Number(bookmark.add_date);
+        if (!isNaN(num) && num > 0) {
+            return num < 1e11 ? num * 1000 : num;
+        }
+    }
+    return 0;
+}
+
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false) {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false, flatDateSort = false, dateSortOrder = "desc") {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
@@ -87,6 +110,8 @@ export class OrganizerService {
         this.sortAlphabetically = sortAlphabetically;
         this.removeDuplicates = removeDuplicates;
         this.cleanTitles = cleanTitles;
+        this.flatDateSort = flatDateSort;
+        this.dateSortOrder = dateSortOrder; // 'desc' (newest first) or 'asc' (oldest first)
         this.batchSize = 50;
         this.isCancelled = false;
         this.stats = {
@@ -94,7 +119,9 @@ export class OrganizerService {
             duplicatesRemoved: 0,
             deadLinksArchived: 0,
             categoriesCount: 0,
-            categoryBreakdown: {}
+            categoryBreakdown: {},
+            isFlat: flatDateSort,
+            dateSortOrder
         };
     }
 
@@ -182,7 +209,13 @@ export class OrganizerService {
                 for (const node of nodes) {
                     if (node.url) {
                         if (node.url.startsWith('http')) {
-                            allLinks.push({ title: node.title, url: node.url, id: node.id });
+                            allLinks.push({
+                                title: node.title,
+                                url: node.url,
+                                id: node.id,
+                                dateAdded: node.dateAdded,
+                                add_date: node.dateAdded ? String(Math.floor(node.dateAdded / 1000)) : undefined
+                            });
                         }
                     }
                     if (node.children) {
@@ -211,6 +244,110 @@ export class OrganizerService {
         if (allLinks.length === 0) {
             this.onProgress({ status: 'done', message: 'No bookmarks to organize.' });
             return null;
+        }
+
+        if (this.flatDateSort) {
+            let processedLinks = allLinks;
+
+            if (this.cleanTitles && this.apiKey) {
+                this.onProgress({ status: 'info', message: 'Cleaning bookmark titles with AI...' });
+                const dummySchema = { categories: [{ name: 'Bookmarks', sub_categories: [] }] };
+                const batchSize = this.calculateAdaptiveBatchSize(processedLinks.length);
+                const batches = [];
+                for (let i = 0; i < processedLinks.length; i += batchSize) {
+                    batches.push({
+                        index: batches.length,
+                        batchData: processedLinks.slice(i, i + batchSize)
+                    });
+                }
+
+                const cleanedBatches = new Array(batches.length);
+                for (let i = 0; i < batches.length; i++) {
+                    if (this.isCancelled) break;
+                    this.onProgress({
+                        status: 'processing',
+                        message: `Cleaning titles (batch ${i + 1}/${batches.length})...`,
+                        percent: Math.round((i / batches.length) * 100)
+                    });
+                    cleanedBatches[i] = await this.classifyWithSubdivision(batches[i].batchData, dummySchema, `${i + 1}`);
+                }
+                if (this.isCancelled) {
+                    this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                    return null;
+                }
+                processedLinks = cleanedBatches.flat().filter(Boolean);
+            }
+
+            // Ensure no categories/folders are attached
+            const finalResults = processedLinks.map(b => ({
+                ...b,
+                category: null,
+                sub_category: null
+            }));
+
+            // Chronological sort
+            const isDesc = this.dateSortOrder !== 'asc'; // default 'desc' (newest first)
+            this.onProgress({
+                status: 'info',
+                message: `Sorting ${finalResults.length} bookmarks chronologically (${isDesc ? 'Newest First' : 'Oldest First'})...`
+            });
+
+            finalResults.sort((a, b) => {
+                const timeA = getBookmarkTimestamp(a);
+                const timeB = getBookmarkTimestamp(b);
+                if (timeA === timeB) {
+                    return (a.title || '').localeCompare(b.title || '');
+                }
+                return isDesc ? timeB - timeA : timeA - timeB;
+            });
+
+            finalResults.isFlat = true;
+
+            const timestamps = finalResults.map(getBookmarkTimestamp).filter(t => t > 0);
+            let dateSpan = null;
+            if (timestamps.length > 0) {
+                const minDate = new Date(Math.min(...timestamps)).toLocaleDateString();
+                const maxDate = new Date(Math.max(...timestamps)).toLocaleDateString();
+                dateSpan = `${minDate} – ${maxDate}`;
+                this.onProgress({ status: 'info', message: `Date range: ${dateSpan}` });
+            }
+
+            this.stats = {
+                total: finalResults.length,
+                duplicatesRemoved,
+                deadLinksArchived: 0,
+                categoriesCount: 0,
+                categoryBreakdown: {},
+                isFlat: true,
+                dateSortOrder: this.dateSortOrder,
+                dateSpan
+            };
+            finalResults.stats = this.stats;
+
+            if (fileBookmarks) {
+                this.onProgress({ status: 'info', message: 'Generating chronological file...' });
+                downloadBookmarks(finalResults);
+            } else {
+                this.onProgress({ status: 'info', message: `Saving ${finalResults.length} chronological bookmarks to browser...` });
+                const rootId = '2';
+                const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
+                const rootFolder = await findOrCreateFolder(rootId, folderTitle);
+
+                const WRITE_CHUNK_SIZE = 15;
+                for (let i = 0; i < finalResults.length; i += WRITE_CHUNK_SIZE) {
+                    if (this.isCancelled) break;
+                    const chunk = finalResults.slice(i, i + WRITE_CHUNK_SIZE);
+                    await Promise.all(chunk.map(b => createBookmark(rootFolder.id, b.title, b.url)));
+                }
+            }
+
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
+            }
+
+            this.onProgress({ status: 'done', message: 'Organization complete!' });
+            return finalResults;
         }
 
         // Fast link reachability check: isolate unreachable URLs so they bypass AI classification

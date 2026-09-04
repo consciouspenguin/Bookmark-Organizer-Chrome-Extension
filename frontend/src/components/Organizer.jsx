@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -32,49 +32,33 @@ export default function Organizer() {
 
     // API Key — single field accepts a Google AI Studio ("AIza...") or OpenRouter ("sk-or-...") key
     const [apiKey, setApiKey] = useState('')
+
+    // Auto-detect provider from key format
     const provider = useMemo(() => detectProvider(apiKey), [apiKey])
 
-    // Model Selection — Gemini Flash & Flash-Lite models (OpenRouter + Google AI Studio)
-    const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
+    // Models supported for Google Gemini
     const models = useMemo(() => [
-        {
-            id: 'google/gemini-3.1-flash-lite',
-            name: '3.1 Flash Lite',
-            badge: 'Fast & Cheap',
-            label: '3.1 Flash Lite (Fast & Cheap)',
-            description: '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'
-        },
-        {
-            id: 'google/gemini-3.8-flash',
-            name: '3.8 Flash',
-            badge: 'High Accuracy',
-            label: '3.8 Flash (High Accuracy)',
-            description: '3.8 Flash: Highest taxonomy accuracy with fast response times.'
-        },
-        {
-            id: 'google/gemini-3.1-pro-preview',
-            name: '3.1 Pro',
-            badge: 'Deep Reasoning',
-            label: '3.1 Pro (Deep Reasoning)',
-            description: '3.1 Pro: Deepest reasoning model for intricate or ambiguous bookmark hierarchies.'
-        }
+        { id: 'google/gemini-3.1-flash-lite', label: '3.1 Flash Lite', desc: 'Default • Fast, generous quota' },
+        { id: 'google/gemini-3.8-flash', label: '3.8 Flash', desc: 'High intelligence & reasoning' },
+        { id: 'google/gemini-3.1-pro-preview', label: '3.1 Pro Preview', desc: 'Complex taxonomies & heavy loads' },
     ], [])
 
+    const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
+
+    // Default Categories
     const [categories, setCategories] = useState([
-        "Technology & Coding",
-        "News & Research",
-        "Entertainment & Media",
-        "Shopping & Products",
-        "Finance & Business",
-        "Education & Reference",
-        "Social & Community",
-        "Lifestyle & Health",
-        "Work & Productivity",
-        "Design & Creative"
+        'Tech & Development',
+        'Work & Career',
+        'Finance & Crypto',
+        'Design & Media',
+        'Reading & Knowledge',
+        'Entertainment & Social',
+        'Shopping & Tools',
+        'Travel & Lifestyle'
     ])
     const [newCategory, setNewCategory] = useState('')
 
-    // Sort folders/bookmarks alphabetically after classification
+    // Alphabetical Sorting toggle — controls folder and bookmark sorting inside folders
     const [sortAlphabetically, setSortAlphabetically] = useState(true)
 
     // Keep only one copy of each exact URL in the organized output.
@@ -83,13 +67,18 @@ export default function Organizer() {
     // Clean messy or truncated titles with AI
     const [cleanTitles, setCleanTitles] = useState(false)
 
+    // Flat chronological sort by date added
+    const [flatDateSort, setFlatDateSort] = useState(false)
+    const [dateSortOrder, setDateSortOrder] = useState('desc') // 'desc' | 'asc'
+
     // Subfolder Target Size
-    const [subfolderTarget, setSubfolderTarget] = useState('5-10')
-    const subfolderOptions = useMemo(() => [
+    const subfolderTargetOptions = useMemo(() => [
         { id: '0-5', label: 'Compact (0-5)', description: 'Minimal subfolders' },
         { id: '5-10', label: 'Balanced (5-10)', description: 'Recommended' },
         { id: '10+', label: 'Detailed (10+)', description: 'More specific grouping' }
     ], [])
+    const [subfolderTarget, setSubfolderTarget] = useState('5-10')
+    const subfolderOptions = subfolderTargetOptions
 
     const logContainerRef = useRef(null)
     const organizerRef = useRef(null)
@@ -97,7 +86,7 @@ export default function Organizer() {
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'organizedMeta'], (result) => {
+            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'flatDateSort', 'dateSortOrder', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.selectedModel === 'google/gemini-2.5-pro') {
                     setSelectedModel('google/gemini-3.1-pro-preview')
@@ -111,6 +100,8 @@ export default function Organizer() {
                 if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
                 if (result.cleanTitles !== undefined) setCleanTitles(Boolean(result.cleanTitles))
+                if (typeof result.flatDateSort === 'boolean') setFlatDateSort(result.flatDateSort)
+                if (result.dateSortOrder === 'asc' || result.dateSortOrder === 'desc') setDateSortOrder(result.dateSortOrder)
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
         }
@@ -151,6 +142,16 @@ export default function Organizer() {
     const handleCleanTitlesToggle = useCallback((enabled) => {
         setCleanTitles(enabled)
         updateSetting('cleanTitles', enabled)
+    }, [updateSetting])
+
+    const handleFlatDateSortToggle = useCallback((enabled) => {
+        setFlatDateSort(enabled)
+        updateSetting('flatDateSort', enabled)
+    }, [updateSetting])
+
+    const handleDateSortOrderChange = useCallback((order) => {
+        setDateSortOrder(order)
+        updateSetting('dateSortOrder', order)
     }, [updateSetting])
 
     // File Upload Handlers
@@ -249,102 +250,118 @@ export default function Organizer() {
     }, [])
 
     const startProcess = useCallback(async () => {
-        if (!apiKey) {
-            setErrorMsg(`Please enter your Google AI Studio or OpenRouter API Key.`)
-            return
+        const requiresApiKey = !flatDateSort || cleanTitles;
+        if (requiresApiKey && !apiKey) {
+            setErrorMsg(`Please enter your Google AI Studio or OpenRouter API Key.`);
+            return;
         }
 
-        setIsCancelling(false)
+        setIsCancelling(false);
 
         try {
-            setStatus('processing')
-            const selectedModelLabel = models.find(m => m.id === selectedModel)?.label || selectedModel
-            const subfolderLabel = subfolderOptions.find(opt => opt.id === subfolderTarget)?.label || subfolderTarget
-            setLogs([
-                { message: 'Starting AI Organization...', timestamp: new Date() },
-                { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
-                { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
-                { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
-                { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() },
-                { message: `Clean Bookmark Titles: ${cleanTitles ? 'On' : 'Off'}`, timestamp: new Date() }
-            ])
-            setProgress(0)
-            setErrorMsg('')
-            setBackgroundNotice('')
+            setStatus('processing');
+            if (flatDateSort) {
+                const orderLabel = dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First';
+                setLogs([
+                    { message: 'Starting Chronological Date Sort...', timestamp: new Date() },
+                    { message: 'Mode: Flat List (No Folders / Schema-free)', timestamp: new Date() },
+                    { message: `Sort Direction: ${orderLabel}`, timestamp: new Date() },
+                    { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() },
+                    { message: `Clean Bookmark Titles: ${cleanTitles ? 'On' : 'Off'}`, timestamp: new Date() }
+                ]);
+            } else {
+                const selectedModelLabel = models.find(m => m.id === selectedModel)?.label || selectedModel;
+                const subfolderLabel = subfolderOptions.find(opt => opt.id === subfolderTarget)?.label || subfolderTarget;
+                setLogs([
+                    { message: 'Starting AI Organization...', timestamp: new Date() },
+                    { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
+                    { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
+                    { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
+                    { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() },
+                    { message: `Clean Bookmark Titles: ${cleanTitles ? 'On' : 'Off'}`, timestamp: new Date() }
+                ]);
+            }
+            setProgress(0);
+            setErrorMsg('');
+            setBackgroundNotice('');
 
             organizerRef.current = new OrganizerService(
                 apiKey,
                 categories,
                 (data) => {
                     if (data.status === 'info') {
-                        addLog(data.message)
+                        addLog(data.message);
                     } else if (data.status === 'progress') {
-                        setProgress(data.percent)
+                        setProgress(data.percent);
                     } else if (data.status === 'retry') {
-                        addLog(data.message)
-                        setBackgroundNotice(data.message)
+                        addLog(data.message);
+                        setBackgroundNotice(data.message);
                     } else if (data.status === 'warning') {
-                        addLog(data.message)
+                        addLog(data.message);
                         if (data.message?.includes('Pausing') || data.message?.includes('Retrying') || data.message?.includes('background')) {
-                            setBackgroundNotice(data.message)
+                            setBackgroundNotice(data.message);
                         }
                         if (data.message?.includes('cancelled')) {
-                            setStatus('idle')
-                            setIsCancelling(false)
+                            setStatus('idle');
+                            setIsCancelling(false);
                         }
                     } else if (data.status === 'error') {
-                        setErrorMsg(data.message)
-                        setBackgroundNotice('')
-                        setStatus('error')
+                        setErrorMsg(data.message);
+                        setBackgroundNotice('');
+                        setStatus('error');
                     } else if (data.status === 'success') {
-                        addLog(data.message)
+                        addLog(data.message);
                     } else if (data.status === 'done') {
-                        addLog(data.message)
-                        setBackgroundNotice('')
-                        setStatus('complete')
-                        setProgress(100)
+                        addLog(data.message);
+                        setBackgroundNotice('');
+                        setStatus('complete');
+                        setProgress(100);
                     }
                 },
                 selectedModel,
                 subfolderTarget,
                 sortAlphabetically,
                 removeDuplicates,
-                cleanTitles
-            )
+                cleanTitles,
+                flatDateSort,
+                dateSortOrder
+            );
 
             // Pass parsed bookmarks if file mode, otherwise null (browser mode)
-            const results = await organizerRef.current.start(parsedBookmarks)
+            const results = await organizerRef.current.start(parsedBookmarks);
 
             if (organizerRef.current?.isCancelled || !results) {
-                setStatus('idle')
-                setIsCancelling(false)
-                return
+                setStatus('idle');
+                setIsCancelling(false);
+                return;
             }
 
             if (results && results.length > 0) {
-                organizedResultsRef.current = results
-                const stats = organizerRef.current?.stats || results.stats || null
-                const meta = { count: results.length, savedAt: Date.now(), stats }
-                setLastOrganized(meta)
+                organizedResultsRef.current = results;
+                const stats = organizerRef.current?.stats || results.stats || null;
+                const meta = { count: results.length, savedAt: Date.now(), stats };
+                setLastOrganized(meta);
                 if (typeof chrome !== 'undefined' && chrome.storage) {
                     chrome.storage.local.set({ organizedData: results, organizedMeta: meta }, () => {
                         if (chrome.runtime.lastError) {
-                            addLog(`Could not save results for later download: ${chrome.runtime.lastError.message}`)
+                            addLog(`Could not save results for later download: ${chrome.runtime.lastError.message}`);
                         } else {
-                            addLog('Results saved — downloadable anytime, even after closing this panel.')
+                            addLog('Results saved — downloadable anytime, even after closing this panel.');
                         }
-                    })
+                    });
                 }
             }
 
         } catch (err) {
-            console.error(err)
-            setErrorMsg("Failed to start process.")
-            setStatus('error')
+            console.error(err);
+            setErrorMsg("Failed to start process.");
+            setStatus('error');
         } finally {
-            setIsCancelling(false)
+            setIsCancelling(false);
         }
-    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates, cleanTitles])
+    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates, cleanTitles, flatDateSort, dateSortOrder]);
+
+    const canStart = (flatDateSort && !cleanTitles) || Boolean(apiKey);
 
     return (
         <div className="glass-panel" style={{ width: '100%', padding: '2rem', textAlign: 'left', boxSizing: 'border-box' }}>
@@ -352,9 +369,9 @@ export default function Organizer() {
             {/* API Key Input */}
             <div style={{ marginBottom: '2rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                    API Key <span style={{ color: 'var(--error)' }}>*</span>
+                    API Key {(!flatDateSort || cleanTitles) ? <span style={{ color: 'var(--error)' }}>*</span> : null}
                     <span style={{ marginLeft: '0.5rem', color: 'var(--text-muted)', fontWeight: '400' }}>
-                        Google AI Studio or OpenRouter
+                        {flatDateSort && !cleanTitles ? 'Optional for flat date sorting' : 'Google AI Studio or OpenRouter'}
                     </span>
                 </label>
                 <input
@@ -397,7 +414,7 @@ export default function Organizer() {
             </div>
 
             {/* Model Selector */}
-            {status === 'idle' && (
+            {status === 'idle' && (!flatDateSort || cleanTitles) && (
                 <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
                         Select AI Model
@@ -448,8 +465,126 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Subfolder Target Size */}
+            {/* Sort by Date Added (Flat List) */}
             {status === 'idle' && (
+                <div style={{
+                    marginBottom: '2rem',
+                    padding: '1.5rem',
+                    background: 'var(--surface-alt)',
+                    borderRadius: '8px',
+                    border: flatDateSort ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    transition: 'border-color 0.2s ease'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Clock size={18} style={{ color: flatDateSort ? 'var(--accent)' : 'var(--text-secondary)' }} />
+                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600' }}>
+                                    Sort by Date Added (Flat List)
+                                </label>
+                            </div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: '1.4' }}>
+                                Generates a single continuous list of bookmarks sorted chronologically with no folders or AI categories. Fast, zero-token execution.
+                            </div>
+                        </div>
+                        <button
+                            role="switch"
+                            aria-label="Sort by Date Added (Flat List)"
+                            aria-checked={flatDateSort}
+                            onClick={() => handleFlatDateSortToggle(!flatDateSort)}
+                            style={{
+                                width: '44px',
+                                height: '24px',
+                                borderRadius: '12px',
+                                border: '1px solid var(--border)',
+                                background: flatDateSort ? 'var(--accent)' : 'var(--surface-solid)',
+                                position: 'relative',
+                                cursor: 'pointer',
+                                padding: 0,
+                                flexShrink: 0,
+                                transition: 'background 0.2s ease'
+                            }}
+                        >
+                            <span style={{
+                                position: 'absolute',
+                                top: '2px',
+                                left: flatDateSort ? '22px' : '2px',
+                                width: '18px',
+                                height: '18px',
+                                borderRadius: '50%',
+                                background: flatDateSort ? 'var(--on-accent)' : 'var(--text-muted)',
+                                transition: 'left 0.2s ease'
+                            }} />
+                        </button>
+                    </div>
+
+                    {flatDateSort && (
+                        <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '500' }}>
+                                Chronological Direction
+                            </label>
+                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDateSortOrderChange('desc')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.55rem 0.75rem',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: dateSortOrder === 'desc' ? 'var(--accent-gradient)' : 'transparent',
+                                        color: dateSortOrder === 'desc' ? 'var(--on-accent)' : 'var(--text-secondary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.85rem',
+                                        fontWeight: dateSortOrder === 'desc' ? '600' : '500',
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '0.4rem',
+                                        boxShadow: dateSortOrder === 'desc' ? '0 1px 10px var(--accent-glow)' : 'none'
+                                    }}
+                                >
+                                    <ArrowDown size={15} />
+                                    <span>Newest First</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDateSortOrderChange('asc')}
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.55rem 0.75rem',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: dateSortOrder === 'asc' ? 'var(--accent-gradient)' : 'transparent',
+                                        color: dateSortOrder === 'asc' ? 'var(--on-accent)' : 'var(--text-secondary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.85rem',
+                                        fontWeight: dateSortOrder === 'asc' ? '600' : '500',
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '0.4rem',
+                                        boxShadow: dateSortOrder === 'asc' ? '0 1px 10px var(--accent-glow)' : 'none'
+                                    }}
+                                >
+                                    <ArrowUp size={15} />
+                                    <span>Oldest First</span>
+                                </button>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                {dateSortOrder === 'desc'
+                                    ? 'Recently saved bookmarks appear at the top, oldest at the bottom.'
+                                    : 'Oldest saved bookmarks appear first in archive order.'}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Subfolder Target Size */}
+            {status === 'idle' && !flatDateSort && (
                 <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                     <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
                         Subfolder Organization
@@ -484,7 +619,7 @@ export default function Organizer() {
             )}
 
             {/* Alphabetical Sorting Toggle */}
-            {status === 'idle' && (
+            {status === 'idle' && !flatDateSort && (
                 <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
                     <div>
                         <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
@@ -576,7 +711,7 @@ export default function Organizer() {
                             Clean Titles with AI
                         </label>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                            Rewrites messy or truncated titles
+                            {flatDateSort ? 'Rewrites messy or truncated titles using AI (requires API key) while preserving chronological date order' : 'Rewrites messy or truncated titles'}
                         </div>
                     </div>
                     <button
@@ -612,7 +747,7 @@ export default function Organizer() {
             )}
 
             {/* Category Editor */}
-            {status === 'idle' && (
+            {status === 'idle' && !flatDateSort && (
                 <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)' }}>
                     <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)', fontSize: '1.1rem' }}>Customize Categories</h3>
 
@@ -771,7 +906,8 @@ export default function Organizer() {
                         padding: '0.75rem 1rem'
                     }}>
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            Last run: {lastOrganized.count.toLocaleString()} bookmarks organized
+                            Last run: {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
+                            {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
                             {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
                             <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
@@ -877,7 +1013,9 @@ export default function Organizer() {
                 {status === 'complete' ? (
                     <div style={{ textAlign: 'center', width: '100%' }}>
                         <div style={{ marginBottom: '0.75rem', color: 'var(--success)', fontSize: '1.2rem', fontWeight: 'bold' }}>
-                            {uploadedFile ? "File Processed! Check your downloads." : 'All Done! Check your "AI Organized Bookmarks" folder.'}
+                            {uploadedFile
+                                ? "File Processed! Check your downloads."
+                                : (flatDateSort ? 'All Done! Check your "Chronological Bookmarks" folder.' : 'All Done! Check your "AI Organized Bookmarks" folder.')}
                         </div>
                         {lastOrganized?.stats && (
                             <div style={{
@@ -894,7 +1032,7 @@ export default function Organizer() {
                                 fontSize: '0.85rem',
                                 color: 'var(--text-secondary)'
                             }}>
-                                <span><strong>{lastOrganized.stats.total.toLocaleString()}</strong> organized</span>
+                                <span><strong>{lastOrganized.stats.total.toLocaleString()}</strong> {lastOrganized.stats.isFlat ? 'sorted' : 'organized'}</span>
                                 <span>•</span>
                                 <span><strong>{lastOrganized.stats.duplicatesRemoved}</strong> duplicates</span>
                                 {lastOrganized.stats.deadLinksArchived > 0 && (
@@ -903,8 +1041,23 @@ export default function Organizer() {
                                         <span><strong>{lastOrganized.stats.deadLinksArchived}</strong> dead archived</span>
                                     </>
                                 )}
-                                <span>•</span>
-                                <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                                {lastOrganized.stats.isFlat ? (
+                                    <>
+                                        <span>•</span>
+                                        <span><strong>{lastOrganized.stats.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}</strong></span>
+                                        {lastOrganized.stats.dateSpan && (
+                                            <>
+                                                <span>•</span>
+                                                <span>{lastOrganized.stats.dateSpan}</span>
+                                            </>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <span>•</span>
+                                        <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                                    </>
+                                )}
                             </div>
                         )}
                         {lastOrganized?.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
@@ -1000,7 +1153,7 @@ export default function Organizer() {
                                     style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
                                 >
                                     <Download size={18} />
-                                    Download Organized Bookmarks
+                                    {lastOrganized.stats?.isFlat ? 'Download Chronological Bookmarks' : 'Download Organized Bookmarks'}
                                 </button>
                             </div>
                         )}
@@ -1017,7 +1170,7 @@ export default function Organizer() {
                                 display: 'inline-block'
                             }}
                         >
-                            Organize Again
+                            {flatDateSort ? 'Sort Again' : 'Organize Again'}
                         </div>
                     </div>
                 ) : status === 'processing' ? (
@@ -1064,17 +1217,26 @@ export default function Organizer() {
                     <button
                         className="btn-primary"
                         onClick={startProcess}
-                        disabled={!apiKey}
+                        disabled={!canStart}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            opacity: !apiKey ? 0.5 : 1,
-                            cursor: !apiKey ? 'not-allowed' : 'pointer'
+                            opacity: !canStart ? 0.5 : 1,
+                            cursor: !canStart ? 'not-allowed' : 'pointer'
                         }}
                     >
-                        {uploadedFile ? <FileText size={20} /> : <Bookmark size={20} />}
-                        {uploadedFile ? 'Organize File & Download' : 'Organize My Bookmarks'}
+                        {flatDateSort ? (
+                            <>
+                                <Clock size={20} />
+                                {uploadedFile ? 'Sort File & Download' : 'Sort My Bookmarks by Date'}
+                            </>
+                        ) : (
+                            <>
+                                {uploadedFile ? <FileText size={20} /> : <Bookmark size={20} />}
+                                {uploadedFile ? 'Organize File & Download' : 'Organize My Bookmarks'}
+                            </>
+                        )}
                     </button>
                 )}
             </div>
