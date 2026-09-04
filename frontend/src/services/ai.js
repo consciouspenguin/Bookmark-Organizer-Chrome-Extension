@@ -61,7 +61,8 @@ const STATUS_LABELS = {
 // full JSON body (OpenRouter and Gemini both nest the useful text under
 // `error.message`); dumping the whole thing floods the terminal, so we pull
 // out just the message and pair it with a friendly status label.
-function summarizeApiError(status, errorText) {
+function summarizeApiError(response, errorText) {
+    const status = response?.status || 500;
     const label = STATUS_LABELS[status] || `request failed (HTTP ${status})`;
 
     let detail = "";
@@ -80,6 +81,14 @@ function summarizeApiError(status, errorText) {
 
     const error = new Error(detail ? `${label} — ${detail}` : label);
     error.statusCode = status;
+
+    if (response?.headers?.get) {
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+            error.retryAfterMs = retryAfter * 1000;
+        }
+    }
+
     return error;
 }
 
@@ -177,10 +186,25 @@ function parseGeminiResponse(data) {
 // Single model call routed to the right provider by key prefix. Returns the
 // parsed JSON object. Throws errors tagged with statusCode/retryable so the
 // shared withRetry wrapper can decide whether to back off and try again.
+const REQUEST_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(url, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error("request timeout")), REQUEST_TIMEOUT_MS);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Single model call routed to the right provider by key prefix. Returns the
+// parsed JSON object. Throws errors tagged with statusCode/retryable so the
+// shared withRetry wrapper can decide whether to back off and try again.
 async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens }) {
     if (detectProvider(apiKey) === 'gemini') {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModelId(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -195,13 +219,13 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
         });
 
         if (!response.ok) {
-            throw summarizeApiError(response.status, await response.text());
+            throw summarizeApiError(response, await response.text());
         }
 
         return parseGeminiResponse(await response.json());
     }
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: OR_HEADERS(apiKey),
         body: JSON.stringify({
@@ -217,13 +241,13 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
     });
 
     if (!response.ok) {
-        throw summarizeApiError(response.status, await response.text());
+        throw summarizeApiError(response, await response.text());
     }
 
     return parseModelResponse(await response.json());
 }
 
-// Generic retry wrapper with exponential backoff
+// Generic retry wrapper with exponential backoff, jitter, and Retry-After header support
 async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000) {
     let lastError;
 
@@ -241,9 +265,11 @@ async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000) {
                 throw error;
             }
 
-            // Calculate delay: 1s, 2s, 4s, 8s, etc.
-            const delayMs = initialDelayMs * Math.pow(2, attempt - 1);
-            console.log(`Attempt ${attempt} failed, retrying in ${delayMs}ms:`, error.message);
+            // Calculate delay: exponential backoff with jitter (0.75x to 1.25x)
+            const exponentialDelay = initialDelayMs * Math.pow(2, attempt - 1) * (0.75 + Math.random() * 0.5);
+            // Respect Retry-After header if provided by server, capped at 30 seconds
+            const delayMs = Math.min(30000, Math.max(exponentialDelay, error.retryAfterMs || 0));
+            console.log(`Attempt ${attempt} failed, retrying in ${Math.round(delayMs)}ms:`, error.message);
 
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
