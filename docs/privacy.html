@@ -34,58 +34,44 @@
 
 <body>
     <h1>Privacy Policy</h1>
-    <p class="date">Last Updated: June 9, 2026</p>
+    <p class="date">Last Updated: September 4, 2026</p>
 
     <p>This Privacy Policy describes how the <strong>AI Bookmark Organizer</strong> browser extension ("we", "us", or
         "our") handles your information.</p>
 
     <h2>1. Data Collection and Usage</h2>
-    <p><strong>We do not collect, store, or share any of your personal data.</strong></p>
-    <p>The extension operates with a "Privacy First" philosophy:</p>
+    <p><strong>We do not collect, store, transmit, or share any of your personal data.</strong></p>
+    <p>The extension operates with a strict "Privacy First" architecture:</p>
     <ul>
-        <li><strong>Local Processing:</strong> All bookmark analysis and organization logic runs locally within your
+        <li><strong>Local Processing:</strong> All bookmark analysis, folder generation, and sorting logic runs locally within your
             browser's memory.</li>
-        <li><strong>No Remote Storage:</strong> We do not have servers, databases, or analytics trackers. Your bookmarks
-            are never sent to us.</li>
+        <li><strong>Zero-Token Offline Mode:</strong> When using the "Sort by Date Added (Flat List)" mode without AI title cleanup, no network calls are dispatched and no data leaves your machine.</li>
+        <li><strong>No Telemetry or Remote Storage:</strong> We do not operate servers, databases, user accounts, or analytics trackers. Your bookmarks and browsing history are never transmitted to us.</li>
     </ul>
 
     <h2>2. Third-Party Services (AI)</h2>
-    <p>To provide intelligent categorization, the extension communicates directly with the <strong>OpenRouter
-            API</strong> (which may route to Google Gemini or other models depending on your selection).</p>
+    <p>When you choose to run AI-powered organization or title cleanup, the extension communicates directly from your browser to either the <strong>Google Gemini API</strong> (via Google AI Studio) or the <strong>OpenRouter API</strong>, depending on the API key you provide.</p>
     <ul>
-        <li><strong>Direct Connection:</strong> Your API Key and bookmark titles are sent directly from your browser to
-            OpenRouter. They do not pass through our servers.</li>
-        <li><strong>Ephemeral Data:</strong> The data sent to the AI model is used solely for the purpose of
-            categorization and is not retained by us.</li>
+        <li><strong>Direct Client-to-Provider Connection:</strong> Your API Key and bookmark titles/URLs are transmitted directly from your client to Google Gemini (<code>generativelanguage.googleapis.com</code>) or OpenRouter (<code>openrouter.ai</code>). They never pass through any intermediary server.</li>
+        <li><strong>Ephemeral Processing:</strong> Transmitted bookmark data is processed solely to generate categories and clean titles during the active session and is not retained by this extension.</li>
+        <li><strong>Provider Policies:</strong> Please review <a href="https://policies.google.com/privacy" target="_blank">Google's Privacy Policy</a> and <a href="https://openrouter.ai/privacy" target="_blank">OpenRouter's Privacy Policy</a> to understand their respective data handling terms.</li>
     </ul>
-    <p>Please review <a href="https://openrouter.ai/privacy" target="_blank">OpenRouter's Privacy Policy</a> to
-        understand how they handle API requests.</p>
 
-    <h2>3. Permissions</h2>
-    <p>The extension requires the following permissions to function. Each is used only for the purpose described
-        below, and for no other purpose:</p>
+    <h2>3. Permissions Justification</h2>
+    <p>The extension requests only the minimum permissions necessary to function:</p>
     <ul>
-        <li><strong>bookmarks:</strong> To read your existing bookmarks and write the newly organized folder
-            structure back into the browser. This is the extension's core function.</li>
-        <li><strong>storage:</strong> To locally store your OpenRouter API key and your theme/model preferences on
-            your device so you don't have to re-enter them. This data never leaves your browser.</li>
-        <li><strong>downloads:</strong> To export your organized bookmarks as an HTML file when you process an
-            uploaded bookmarks file, so you can save the cleaned-up result.</li>
-        <li><strong>sidePanel:</strong> To display the extension's interface in the browser's side panel.</li>
-        <li><strong>Host permission (<code>https://openrouter.ai/*</code>):</strong> To send your bookmark titles and
-            URLs directly from your browser to the OpenRouter API for AI categorization. The extension has no backend
-            server of its own, so it must make these requests directly from the client. This permission is scoped to
-            only <code>openrouter.ai</code> &mdash; the single endpoint that performs the categorization &mdash; and no
-            data is sent to any other host.</li>
+        <li><strong>bookmarks:</strong> To read your existing bookmark collection and write organized folders or chronological lists back into Chrome. This is the core functionality.</li>
+        <li><strong>storage:</strong> To persist your user preferences (such as chosen model, custom category lists, and API key) locally in your browser's LevelDB storage. This data never leaves your device.</li>
+        <li><strong>downloads:</strong> To export your organized bookmarks as a standard Netscape HTML file when using file upload mode.</li>
+        <li><strong>sidePanel:</strong> To render the extension's user interface seamlessly in the Chrome side panel.</li>
+        <li><strong>Host permissions (<code>https://generativelanguage.googleapis.com/*</code>, <code>https://openrouter.ai/*</code>):</strong> To transmit bookmark titles directly to Google Gemini or OpenRouter for AI schema design and classification. Scoped exclusively to these two AI provider endpoints.</li>
     </ul>
 
     <h2>4. Remote Code</h2>
-    <p>This extension does <strong>not</strong> download or execute any remote code. It only transmits your bookmark
-        data to the OpenRouter API and receives categorization results in return. All executable code is contained
-        within the published extension package.</p>
+    <p>This extension does <strong>not</strong> load or execute any remote code or external scripts. All code is statically bundled within the extension package reviewed by the Chrome Web Store.</p>
 
     <h2>5. Contact</h2>
-    <p>If you have questions about this policy, you may contact the developer via the <a
+    <p>If you have questions about this policy, you may open an issue on the <a
             href="https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension/issues">GitHub Repository</a>.
     </p>
 </body>
