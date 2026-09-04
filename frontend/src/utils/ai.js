@@ -32,7 +32,7 @@ export const classifyBatch = async (batch, apiKey) => {
                 "X-Title": "Bookmark Organizer Extension"
             },
             body: JSON.stringify({
-                model: "google/gemini-3.5-flash",
+                model: "google/gemini-3.8-flash",
                 messages: [
                     { role: "system", content: "You are a precise JSON generator. Output only valid JSON. Do not use Markdown blocks." },
                     { role: "user", content: prompt }

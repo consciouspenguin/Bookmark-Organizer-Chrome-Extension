@@ -17,13 +17,14 @@ export default function Organizer() {
     const [apiKey, setApiKey] = useState('')
     const provider = useMemo(() => detectProvider(apiKey), [apiKey])
 
-    // Model Selection
+    // Model Selection — Gemini Flash & Flash-Lite models (OpenRouter + Google AI Studio)
     const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
     const models = useMemo(() => [
+        { id: 'google/gemini-3.1-flash-lite', label: '3.1 Flash Lite (Fast & Cheap)' },
+        { id: 'google/gemini-3.8-flash', label: '3.8 Flash (Recommended)' },
+        { id: 'google/gemini-3.7-flash', label: '3.7 Flash' },
         { id: 'google/gemini-2.5-flash', label: '2.5 Flash' },
-        { id: 'google/gemini-2.5-pro', label: '2.5 Pro' },
-        { id: 'google/gemini-3.1-flash-lite', label: '3.1 Flash Lite' },
-        { id: 'google/gemini-3.5-flash', label: '3.5 Flash' }
+        { id: 'google/gemini-2.5-pro', label: '2.5 Pro' }
     ], [])
 
     const [categories, setCategories] = useState([
