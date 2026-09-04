@@ -364,7 +364,15 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
     );
 }
 
-export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", onRetry = null) {
+export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", cleanTitles = false, onRetry = null) {
+    const titleInstruction = cleanTitles
+        ? `\n    6. Title cleanup: If clean_title is requested, provide a cleaned, human-readable title in the 'clean_title' field for each bookmark (strip site prefixes/suffixes like 'Login |', '- Wikipedia', query noise, or convert raw URL titles into clean titles). If the existing title is already clean, keep it as is.`
+        : '';
+
+    const returnSchema = cleanTitles
+        ? '{ "classified": [ { "i": 0, "category": "...", "sub_category": "...", "clean_title": "..." } ] }'
+        : '{ "classified": [ { "i": 0, "category": "...", "sub_category": "..." } ] }';
+
     const prompt = `
     Classify these ${bookmarks.length} bookmarks into the fixed folder structure below.
 
@@ -376,9 +384,9 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
     2. You MUST use category and sub_category strings EXACTLY as written in the schema above (same spelling, casing, spacing). Do not paraphrase or invent variants.
     3. If a bookmark fits a category but no sub-category within it, use "General" as the sub_category.
     4. If a bookmark fits no category at all, classify it as category "Other" with sub_category "General".
-    5. Every bookmark must be classified exactly once. Refer to each bookmark ONLY by its index "i" — do NOT repeat titles or urls in your output.
+    5. Every bookmark must be classified exactly once. Refer to each bookmark ONLY by its index "i" — do NOT repeat titles or urls in your output.${titleInstruction}
 
-    Return JSON object: { "classified": [ { "i": 0, "category": "...", "sub_category": "..." } ] }
+    Return JSON object: ${returnSchema}
 
     BOOKMARKS (each with its index "i"):
     ${JSON.stringify(bookmarks.map((b, i) => ({ i, title: b.title, url: b.url })))}
@@ -390,10 +398,9 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
         const parsed = await callModel(apiKey, model, systemContent, prompt, { temperature: 0.1, maxTokens: 8000 });
 
         // Join the model's index-only answers back to the source bookmarks.
-        // Titles and urls come from OUR data, never from model output — the
-        // model can no longer mangle them, overflow max_tokens echoing long
-        // urls, or corrupt the JSON with odd characters from titles. The
-        // spread also carries fields the AI never sees (icon, add_date)
+        // Titles and urls come from OUR data, never from model output unless
+        // cleanTitles is enabled and the model provides a valid clean_title.
+        // The spread also carries fields the AI never sees (icon, add_date)
         // through to the export.
         const byIndex = new Map();
         for (const entry of parsed.classified || []) {
@@ -401,11 +408,16 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
                 byIndex.set(entry.i, entry);
             }
         }
-        return bookmarks.map((b, i) => ({
-            ...b,
-            category: byIndex.get(i)?.category || 'Other',
-            sub_category: byIndex.get(i)?.sub_category || 'General'
-        }));
+        return bookmarks.map((b, i) => {
+            const entry = byIndex.get(i);
+            const hasCleanTitle = cleanTitles && typeof entry?.clean_title === 'string' && entry.clean_title.trim().length > 0;
+            return {
+                ...b,
+                title: hasCleanTitle ? entry.clean_title.trim() : b.title,
+                category: entry?.category || 'Other',
+                sub_category: entry?.sub_category || 'General'
+            };
+        });
     }, 3, 1000, onRetry);
 }
 
