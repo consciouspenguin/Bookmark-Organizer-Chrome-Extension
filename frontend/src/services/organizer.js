@@ -78,7 +78,7 @@ export function removeDuplicateUrls(bookmarks) {
 }
 
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.8-flash", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false) {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false) {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
@@ -99,6 +99,56 @@ export class OrganizerService {
 
     cancel() {
         this.isCancelled = true;
+    }
+
+    async classifyWithSubdivision(batchData, schema, label = '') {
+        if (this.isCancelled) return [];
+
+        try {
+            return await classifyBatch(
+                batchData,
+                this.apiKey,
+                schema,
+                this.model,
+                this.cleanTitles,
+                () => this.isCancelled,
+                ({ delayMs, isRateLimit }) => {
+                    const sec = Math.ceil(delayMs / 1000);
+                    this.onProgress({
+                        status: 'warning',
+                        message: isRateLimit
+                            ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${label}...`
+                            : `Network issue on batch ${label}. Retrying in ${sec}s...`
+                    });
+                }
+            );
+        } catch (err) {
+            if (this.isCancelled || err?.isCancelled) {
+                return [];
+            }
+
+            if (batchData.length > 5) {
+                const mid = Math.ceil(batchData.length / 2);
+                this.onProgress({
+                    status: 'info',
+                    message: `Splitting batch ${label} (${batchData.length} items) into smaller chunks of ${mid} to ensure 100% classification...`
+                });
+                const left = await this.classifyWithSubdivision(batchData.slice(0, mid), schema, `${label}.1`);
+                const right = await this.classifyWithSubdivision(batchData.slice(mid), schema, `${label}.2`);
+                return [...left, ...right];
+            }
+
+            console.error(`Batch ${label} failed on second pass:`, err);
+            this.onProgress({
+                status: 'warning',
+                message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.`
+            });
+            return batchData.map(b => ({
+                ...b,
+                category: 'Other',
+                sub_category: 'General'
+            }));
+        }
     }
 
     calculateAdaptiveBatchSize(totalBookmarks) {
@@ -191,10 +241,14 @@ export class OrganizerService {
                     this.categories,
                     this.model,
                     this.subfolderTarget,
-                    ({ attempt, maxRetries, delayMs, error }) => {
+                    () => this.isCancelled,
+                    ({ delayMs, isRateLimit, attempt }) => {
+                        const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
                             status: 'retry',
-                            message: `Schema generation encounter: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run is still progressing in background...`
+                            message: isRateLimit
+                                ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation — run still progressing in background...`
+                                : `Network issue during schema generation. Retrying in ${sec}s — run still progressing in background...`
                         });
                     }
                 );
@@ -208,11 +262,20 @@ export class OrganizerService {
                     });
                 }
             } catch (err) {
+                if (this.isCancelled || err?.isCancelled) {
+                    this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                    return null;
+                }
                 console.error('Schema generation failed, falling back to basic categories:', err);
                 this.onProgress({ status: 'warning', message: `Schema generation failed after retries: ${err.message}. Using default categories (no subfolders).` });
                 schema = {
                     categories: this.categories.map(c => ({ name: c, sub_categories: [] }))
                 };
+            }
+
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
             }
 
             const total = activeLinks.length;
@@ -252,13 +315,18 @@ export class OrganizerService {
                         schema,
                         this.model,
                         this.cleanTitles,
-                        ({ attempt, maxRetries, delayMs, error }) => {
+                        () => this.isCancelled,
+                        ({ delayMs, isRateLimit, attempt }) => {
+                            const sec = Math.ceil(delayMs / 1000);
                             this.onProgress({
                                 status: 'retry',
-                                message: `Batch ${currentIdx + 1} request error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
+                                message: isRateLimit
+                                    ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${currentIdx + 1} — run still progressing in background...`
+                                    : `Network issue on batch ${currentIdx + 1}. Retrying in ${sec}s — run still progressing in background...`
                             });
                         }
                     );
+                    if (this.isCancelled) return;
 
                     // Accumulate results
                     results[index] = classified;
@@ -266,6 +334,7 @@ export class OrganizerService {
                     this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
 
                 } catch (err) {
+                    if (this.isCancelled || err?.isCancelled) return;
                     console.error(`Batch ${currentIdx + 1} failed:`, err);
                     failedBatches.push({ index, batchData, label: currentIdx + 1 });
                     this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass. Continuing remaining batches in background...` });
@@ -282,31 +351,19 @@ export class OrganizerService {
             }
             await Promise.all(workers);
 
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
+            }
+
             // Second pass: retry failed batches one at a time, with no concurrent
             // traffic competing — transient network drops usually clear by now.
             for (const { index, batchData, label } of failedBatches) {
                 if (this.isCancelled) break;
 
                 this.onProgress({ status: 'processing', message: `Retrying batch ${label}/${batches.length}...` });
-                try {
-                    results[index] = await classifyBatch(
-                        batchData,
-                        this.apiKey,
-                        schema,
-                        this.model,
-                        this.cleanTitles,
-                        ({ attempt, maxRetries, delayMs, error }) => {
-                            this.onProgress({
-                                status: 'retry',
-                                message: `Batch ${label} retry error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
-                            });
-                        }
-                    );
-                } catch (err) {
-                    console.error(`Batch ${label} failed on second pass:`, err);
-                    results[index] = batchData.map(b => ({ title: b.title, url: b.url, category: 'Other', sub_category: 'General' }));
-                    this.onProgress({ status: 'warning', message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.` });
-                }
+                results[index] = await this.classifyWithSubdivision(batchData, schema, label);
+                if (this.isCancelled) break;
                 processed += batchData.length;
                 this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
             }
@@ -330,6 +387,11 @@ export class OrganizerService {
                 (a.sub_category || '').localeCompare(b.sub_category || '') ||
                 (a.title || '').localeCompare(b.title || '')
             );
+        }
+
+        if (this.isCancelled) {
+            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+            return null;
         }
 
         if (fileBookmarks) {

@@ -191,6 +191,17 @@ describe('classifyBatch cleanTitles option', () => {
 })
 
 describe('OrganizerService cleanTitles integration', () => {
+    let originalFetch
+
+    beforeEach(() => {
+        originalFetch = global.fetch
+    })
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.restoreAllMocks()
+    })
+
     it('defaults cleanTitles to false when omitted', () => {
         const service = new OrganizerService('test-key', [], () => {})
         expect(service.cleanTitles).toBe(false)
@@ -202,11 +213,10 @@ describe('OrganizerService cleanTitles integration', () => {
     })
 
     it('passes cleanTitles as false by default to classifyBatch during start()', async () => {
-        const originalFetch = global.fetch
         global.fetch = vi.fn(async () => ({ ok: true }))
 
-        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
             categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
         })
         const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
@@ -222,22 +232,18 @@ describe('OrganizerService cleanTitles integration', () => {
             expect.arrayContaining([expect.objectContaining({ url: 'https://example.com' })]),
             'test-key',
             expect.any(Object),
-            'google/gemini-3.8-flash',
-            false
+            'google/gemini-3.1-flash-lite',
+            false,
+            expect.any(Function),
+            expect.any(Function)
         )
-
-        downloadBookmarksSpy.mockRestore()
-        generateSchemaSpy.mockRestore()
-        classifyBatchSpy.mockRestore()
-        global.fetch = originalFetch
     })
 
     it('passes cleanTitles to classifyBatch during start() in main worker pass', async () => {
-        const originalFetch = global.fetch
         global.fetch = vi.fn(async () => ({ ok: true }))
 
-        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
             categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
         })
         const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
@@ -263,22 +269,18 @@ describe('OrganizerService cleanTitles integration', () => {
             'test-key',
             expect.any(Object),
             'google/gemini-3.1-flash-lite',
-            true
+            true,
+            expect.any(Function),
+            expect.any(Function)
         )
-
-        downloadBookmarksSpy.mockRestore()
-        generateSchemaSpy.mockRestore()
-        classifyBatchSpy.mockRestore()
-        global.fetch = originalFetch
     })
 
     it('passes cleanTitles to classifyBatch during retry pass for failed batches', async () => {
-        const originalFetch = global.fetch
-        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(console, 'error').mockImplementation(() => {})
         global.fetch = vi.fn(async () => ({ ok: true }))
 
-        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
             categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
         })
         // First call fails (triggering retry pass), second call succeeds
@@ -311,7 +313,9 @@ describe('OrganizerService cleanTitles integration', () => {
             'test-key',
             expect.any(Object),
             'google/gemini-3.1-flash-lite',
-            true
+            true,
+            expect.any(Function),
+            expect.any(Function)
         )
         expect(classifyBatchSpy).toHaveBeenNthCalledWith(
             2,
@@ -319,14 +323,10 @@ describe('OrganizerService cleanTitles integration', () => {
             'test-key',
             expect.any(Object),
             'google/gemini-3.1-flash-lite',
-            true
+            true,
+            expect.any(Function),
+            expect.any(Function)
         )
-
-        consoleErrorSpy.mockRestore()
-        downloadBookmarksSpy.mockRestore()
-        generateSchemaSpy.mockRestore()
-        classifyBatchSpy.mockRestore()
-        global.fetch = originalFetch
     })
 })
 
@@ -556,6 +556,190 @@ describe('classifyBatch and generateSchema default model and cancellation forwar
 
         expect(retryEvents.length).toBe(1)
         expect(retryEvents[0].isRateLimit).toBe(true)
+    })
+})
+
+describe('OrganizerService resilient batch processing and sub-batch subdivision', () => {
+    let originalFetch
+
+    beforeEach(() => {
+        originalFetch = global.fetch
+        global.fetch = vi.fn(async () => ({ ok: true }))
+    })
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.restoreAllMocks()
+    })
+
+    it('defaults model to google/gemini-3.1-flash-lite in constructor', () => {
+        const service = new OrganizerService('test-key', ['Tech'], () => {})
+        expect(service.model).toBe('google/gemini-3.1-flash-lite')
+    })
+
+    it('subdivides failing batches in half recursively on retry until classification succeeds without dumping to Other -> General', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: ['Frontend', 'Backend'] }]
+        })
+
+        const bookmarks = Array.from({ length: 10 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch')
+            // 1. Initial worker pass fails for all 10 items
+            .mockRejectedValueOnce(new Error('Payload size limit or malformed output'))
+            // 2. Retry pass on full 10 items fails again
+            .mockRejectedValueOnce(new Error('Still failing with full batch'))
+            // 3. Sub-batch 1 (items 1..5) succeeds
+            .mockResolvedValueOnce(
+                bookmarks.slice(0, 5).map(b => ({ ...b, category: 'Engineering', sub_category: 'Frontend' }))
+            )
+            // 4. Sub-batch 2 (items 6..10) succeeds
+            .mockResolvedValueOnce(
+                bookmarks.slice(5).map(b => ({ ...b, category: 'Engineering', sub_category: 'Backend' }))
+            )
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // classifyBatch called 4 times: initial, retry-full, sub-batch 1, sub-batch 2
+        expect(classifyBatchSpy).toHaveBeenCalledTimes(4)
+
+        // Progress message logged sub-batch split
+        const splitMsg = progressMessages.find(m => m.includes('Splitting batch 1 (10 items) into smaller chunks of 5'))
+        expect(splitMsg).toBeDefined()
+
+        // 100% of bookmarks classified cleanly — none dumped to Other -> General
+        expect(results).toHaveLength(10)
+        expect(results.every(b => b.category === 'Engineering')).toBe(true)
+        expect(results.some(b => b.category === 'Other')).toBe(false)
+        expect(results.some(b => b.sub_category === 'General')).toBe(false)
+        expect(results.filter(b => b.sub_category === 'Frontend')).toHaveLength(5)
+        expect(results.filter(b => b.sub_category === 'Backend')).toHaveLength(5)
+    })
+
+    it('falls back to Other -> General only when batch size <= 5 and still fails on retry', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 4 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        // Both initial pass and retry pass fail
+        vi.spyOn(ai, 'classifyBatch')
+            .mockRejectedValueOnce(new Error('Unrecoverable parsing failure'))
+            .mockRejectedValueOnce(new Error('Unrecoverable parsing failure'))
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        expect(results).toHaveLength(4)
+        // All 4 filed under Other -> General so none are lost
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+
+        const fallbackMsg = progressMessages.find(m => m.includes('Its 4 bookmarks were filed under Other → General so none are lost.'))
+        expect(fallbackMsg).toBeDefined()
+    })
+
+    it('immediately stops processing and returns null when cancelled during schema generation', async () => {
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        const progressEvents = []
+        const onProgress = (evt) => progressEvents.push(evt)
+
+        const service = new OrganizerService('test-key', ['Tech'], onProgress)
+
+        vi.spyOn(ai, 'generateSchema').mockImplementation(async () => {
+            service.cancel()
+            const err = new Error('Operation cancelled.')
+            err.isCancelled = true
+            throw err
+        })
+        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch')
+
+        const bookmarks = [{ title: 'Site', url: 'https://example.com' }]
+        const result = await service.start(bookmarks)
+
+        expect(result).toBeNull()
+        expect(classifyBatchSpy).not.toHaveBeenCalled()
+        expect(progressEvents).toContainEqual({ status: 'warning', message: 'Process cancelled.' })
+    })
+
+    it('immediately stops processing and returns null when cancelled during batch classification', async () => {
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: [] }]
+        })
+
+        const progressEvents = []
+        const onProgress = (evt) => progressEvents.push(evt)
+
+        const service = new OrganizerService('test-key', ['Tech'], onProgress)
+
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async () => {
+            service.cancel()
+            return [{ title: 'Site', url: 'https://example.com', category: 'Tech', sub_category: 'General' }]
+        })
+
+        const bookmarks = [{ title: 'Site', url: 'https://example.com' }]
+        const result = await service.start(bookmarks)
+
+        expect(result).toBeNull()
+        expect(bookmarksExport.downloadBookmarks).not.toHaveBeenCalled()
+        expect(progressEvents).toContainEqual({ status: 'warning', message: 'Process cancelled.' })
+    })
+
+    it('reports rate limit and network retry notifications to onProgress callback', async () => {
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: [] }]
+        })
+
+        const progressEvents = []
+        const onProgress = (evt) => progressEvents.push(evt)
+
+        const service = new OrganizerService('test-key', ['Tech'], onProgress)
+
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (b, key, sch, m, c, isCanc, onRetry) => {
+            // Simulate rate-limit notification from withRetry
+            onRetry({ attempt: 1, delayMs: 8000, isRateLimit: true, error: new Error('Rate limit') })
+            // Simulate network issue notification
+            onRetry({ attempt: 2, delayMs: 3000, isRateLimit: false, error: new Error('Network error') })
+            return [{ title: 'Site', url: 'https://example.com', category: 'Tech', sub_category: 'General' }]
+        })
+
+        const bookmarks = [{ title: 'Site', url: 'https://example.com' }]
+        await service.start(bookmarks)
+
+        expect(progressEvents).toContainEqual({
+            status: 'warning',
+            message: 'Rate limit reached (429). Pausing for 8s before retrying batch 1...'
+        })
+        expect(progressEvents).toContainEqual({
+            status: 'warning',
+            message: 'Network issue on batch 1. Retrying in 3s...'
+        })
     })
 })
 
