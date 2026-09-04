@@ -5,6 +5,30 @@ import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
 import { downloadBookmarks } from '../services/bookmarks_export'
 
+export const DEFAULT_CATEGORIES = [
+    'Work & Career',
+    'Finance & Crypto',
+    'Design & Media',
+    'Reading & Knowledge',
+    'Entertainment & Social',
+    'Shopping & Tools',
+    'Travel & Lifestyle',
+    'Tech & Development'
+];
+
+export const SUGGESTED_ADDABLE_CATEGORIES = [
+    'Health, Fitness & Wellness',
+    'AI & Machine Learning',
+    'News & Current Affairs',
+    'Recipes & Cooking',
+    'Education & Academia',
+    'Open Source & Code',
+    'Home, DIY & Real Estate',
+    'Podcasts, Audio & Music',
+    'Gaming & Esports',
+    'Legal, Docs & Admin'
+];
+
 export default function Organizer() {
     const [status, setStatus] = useState('idle') // idle, processing, complete, error
     const [logs, setLogs] = useState([])
@@ -38,25 +62,43 @@ export default function Organizer() {
 
     // Models supported for Google Gemini
     const models = useMemo(() => [
-        { id: 'google/gemini-3.1-flash-lite', label: '3.1 Flash Lite', desc: 'Default • Fast, generous quota' },
-        { id: 'google/gemini-3.8-flash', label: '3.8 Flash', desc: 'High intelligence & reasoning' },
-        { id: 'google/gemini-3.1-pro-preview', label: '3.1 Pro Preview', desc: 'Complex taxonomies & heavy loads' },
+        {
+            id: 'google/gemini-3.1-flash-lite',
+            name: '3.1 Flash Lite',
+            label: '3.1 Flash Lite',
+            badge: 'Default',
+            desc: 'Recommended default — ultra-fast latency and minimal token cost.',
+            description: 'Recommended default — ultra-fast latency and minimal token cost.'
+        },
+        {
+            id: 'google/gemini-3.8-flash',
+            name: '3.8 Flash',
+            label: '3.8 Flash',
+            badge: 'Balanced',
+            desc: 'High intelligence & reasoning for everyday bookmark collections.',
+            description: 'High intelligence & reasoning for everyday bookmark collections.'
+        },
+        {
+            id: 'google/gemini-3.1-pro-preview',
+            name: '3.1 Pro Preview',
+            label: '3.1 Pro Preview',
+            badge: 'Deep Reasoning',
+            desc: 'Complex taxonomies & heavy loads with rich nested structures.',
+            description: 'Complex taxonomies & heavy loads with rich nested structures.'
+        },
     ], [])
 
     const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
 
     // Default Categories
-    const [categories, setCategories] = useState([
-        'Tech & Development',
-        'Work & Career',
-        'Finance & Crypto',
-        'Design & Media',
-        'Reading & Knowledge',
-        'Entertainment & Social',
-        'Shopping & Tools',
-        'Travel & Lifestyle'
-    ])
+    const [categories, setCategories] = useState(DEFAULT_CATEGORIES)
     const [newCategory, setNewCategory] = useState('')
+
+    // Suggested Categories not yet in active categories
+    const availableSuggestions = useMemo(() =>
+        SUGGESTED_ADDABLE_CATEGORIES.filter(s => !categories.some(c => c.toLowerCase() === s.toLowerCase())),
+        [categories]
+    )
 
     // Alphabetical Sorting toggle — controls folder and bookmark sorting inside folders
     const [sortAlphabetically, setSortAlphabetically] = useState(true)
@@ -159,6 +201,31 @@ export default function Organizer() {
         setDateSortOrder(order)
         updateSetting('dateSortOrder', order)
     }, [updateSetting])
+
+    const handleAddCategory = useCallback((catName) => {
+        const trimmed = (catName || '').trim();
+        if (!trimmed) return;
+        if (categories.some(c => c.toLowerCase() === trimmed.toLowerCase())) return;
+        const next = [...categories, trimmed];
+        setCategories(next);
+        updateSetting('categories', next);
+    }, [categories, updateSetting]);
+
+    const handleRemoveCategory = useCallback((indexToRemove) => {
+        const next = categories.filter((_, i) => i !== indexToRemove);
+        setCategories(next);
+        updateSetting('categories', next);
+    }, [categories, updateSetting]);
+
+    const handleClearAllCategories = useCallback(() => {
+        setCategories([]);
+        updateSetting('categories', []);
+    }, [updateSetting]);
+
+    const handleResetDefaultCategories = useCallback(() => {
+        setCategories(DEFAULT_CATEGORIES);
+        updateSetting('categories', DEFAULT_CATEGORIES);
+    }, [updateSetting]);
 
     // File Upload Handlers
     const [uploadedFile, setUploadedFile] = useState(null)
@@ -490,7 +557,7 @@ export default function Organizer() {
                         ))}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', lineHeight: '1.4' }}>
-                        {models.find(m => m.id === selectedModel)?.description || '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'}
+                        {models.find(m => m.id === selectedModel)?.description || models.find(m => m.id === selectedModel)?.desc || '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'}
                     </div>
                 </div>
             )}
@@ -500,21 +567,67 @@ export default function Organizer() {
                 <div style={{
                     marginBottom: '2rem',
                     padding: '1.5rem',
-                    background: 'var(--surface-alt)',
-                    borderRadius: '8px',
-                    border: flatDateSort ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    transition: 'border-color 0.2s ease'
+                    background: flatDateSort
+                        ? 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.18))'
+                        : 'var(--surface-alt)',
+                    borderRadius: '12px',
+                    border: flatDateSort ? '2px solid var(--accent)' : '1px dashed var(--border-strong)',
+                    boxShadow: flatDateSort ? '0 4px 20px var(--accent-glow)' : 'none',
+                    transition: 'all 0.25s ease',
+                    position: 'relative'
                 }}>
+                    {/* Top Mode Badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+                        <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.2rem 0.6rem',
+                            borderRadius: '20px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.5px',
+                            textTransform: 'uppercase',
+                            background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
+                            color: flatDateSort ? 'var(--on-accent)' : 'var(--text-muted)',
+                            border: flatDateSort ? 'none' : '1px solid var(--border)',
+                            boxShadow: flatDateSort ? '0 1px 8px var(--accent-glow)' : 'none'
+                        }}>
+                            <Zap size={11} />
+                            {flatDateSort ? 'Flat Mode Active • Zero AI Tokens' : 'Alternative Pipeline'}
+                        </span>
+                        {flatDateSort && (
+                            <span style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                <Check size={13} /> Schema-Free
+                            </span>
+                        )}
+                    </div>
+
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-                        <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <Clock size={18} style={{ color: flatDateSort ? 'var(--accent)' : 'var(--text-secondary)' }} />
-                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
+                            <div style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '10px',
+                                background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
+                                color: flatDateSort ? 'var(--on-accent)' : 'var(--text-secondary)',
+                                border: '1px solid var(--border)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                boxShadow: flatDateSort ? '0 2px 8px var(--accent-glow)' : 'none',
+                                transition: 'all 0.2s ease'
+                            }}>
+                                <Clock size={20} />
+                            </div>
+                            <div>
+                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '1rem', fontWeight: '700' }}>
                                     Sort by Date Added (Flat List)
                                 </label>
-                            </div>
-                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: '1.4' }}>
-                                Generates a single continuous list of bookmarks sorted chronologically with no folders or AI categories. Fast, zero-token execution.
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem', lineHeight: '1.4' }}>
+                                    Generates a single continuous list of bookmarks sorted chronologically with no folders or AI categories. Fast, zero-token execution.
+                                </div>
                             </div>
                         </div>
                         <button
@@ -523,34 +636,53 @@ export default function Organizer() {
                             aria-checked={flatDateSort}
                             onClick={() => handleFlatDateSortToggle(!flatDateSort)}
                             style={{
-                                width: '44px',
-                                height: '24px',
-                                borderRadius: '12px',
+                                width: '46px',
+                                height: '26px',
+                                borderRadius: '13px',
                                 border: '1px solid var(--border)',
                                 background: flatDateSort ? 'var(--accent)' : 'var(--surface-solid)',
                                 position: 'relative',
                                 cursor: 'pointer',
                                 padding: 0,
                                 flexShrink: 0,
-                                transition: 'background 0.2s ease'
+                                transition: 'all 0.2s ease',
+                                boxShadow: flatDateSort ? '0 0 10px var(--accent-glow)' : 'none'
                             }}
                         >
                             <span style={{
                                 position: 'absolute',
                                 top: '2px',
                                 left: flatDateSort ? '22px' : '2px',
-                                width: '18px',
-                                height: '18px',
+                                width: '20px',
+                                height: '20px',
                                 borderRadius: '50%',
                                 background: flatDateSort ? 'var(--on-accent)' : 'var(--text-muted)',
-                                transition: 'left 0.2s ease'
+                                transition: 'left 0.2s ease',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
                             }} />
                         </button>
                     </div>
 
                     {flatDateSort && (
                         <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '500' }}>
+                            <div style={{
+                                marginBottom: '1rem',
+                                padding: '0.75rem 0.9rem',
+                                borderRadius: '8px',
+                                background: 'var(--surface-solid)',
+                                border: '1px solid var(--border)',
+                                fontSize: '0.8rem',
+                                color: 'var(--text-secondary)',
+                                lineHeight: '1.45'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                                    <Zap size={14} style={{ color: 'var(--accent)' }} />
+                                    <span>How This Mode Works</span>
+                                </div>
+                                Bypasses folder creation and AI categorization. All bookmarks are compiled into a clean, flat sequential file ordered strictly by timestamp.
+                            </div>
+
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '600' }}>
                                 Chronological Direction
                             </label>
                             <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -778,76 +910,213 @@ export default function Organizer() {
 
             {/* Category Editor */}
             {status === 'idle' && !flatDateSort && (
-                <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)' }}>
-                    <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)', fontSize: '1.1rem' }}>Customize Categories</h3>
+                <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '12px' }}>
+                    {/* Header with Title, Count Badge, and Clear All / Reset Action */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.05rem', fontWeight: 600 }}>
+                                Customize Categories
+                            </h3>
+                            <span style={{
+                                fontSize: '0.72rem',
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: '12px',
+                                background: 'var(--surface-solid)',
+                                border: '1px solid var(--border)',
+                                color: 'var(--text-muted)'
+                            }}>
+                                {categories.length} chosen
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                            {categories.length > 0 ? (
+                                <button
+                                    type="button"
+                                    onClick={handleClearAllCategories}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem',
+                                        padding: '0.25rem 0.6rem',
+                                        fontSize: '0.75rem',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--error-soft)',
+                                        background: 'var(--error-soft)',
+                                        color: 'var(--error)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    title="Clear all active categories"
+                                >
+                                    <X size={12} />
+                                    <span>Clear All</span>
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={handleResetDefaultCategories}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem',
+                                        padding: '0.25rem 0.6rem',
+                                        fontSize: '0.75rem',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--surface-solid)',
+                                        color: 'var(--accent)',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease'
+                                    }}
+                                    title="Reset to default categories"
+                                >
+                                    <RefreshCw size={12} />
+                                    <span>Reset Defaults</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
 
+                    {/* Custom Category Input */}
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
                         <input
                             type="text"
-                            placeholder="Add generic category..."
+                            placeholder="Add custom category..."
                             value={newCategory}
                             onChange={(e) => setNewCategory(e.target.value)}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && newCategory.trim()) {
-                                    setCategories([...categories, newCategory.trim()]);
+                                    handleAddCategory(newCategory);
                                     setNewCategory('');
                                 }
                             }}
                             style={{
                                 flex: 1,
-                                padding: '0.5rem',
+                                padding: '0.5rem 0.75rem',
                                 borderRadius: '6px',
                                 border: '1px solid var(--border)',
                                 background: 'var(--surface-solid)',
                                 color: 'var(--text-primary)',
-                                outline: 'none'
+                                outline: 'none',
+                                fontSize: '0.85rem'
                             }}
                         />
                         <button
+                            type="button"
                             onClick={() => {
                                 if (newCategory.trim()) {
-                                    setCategories([...categories, newCategory.trim()]);
+                                    handleAddCategory(newCategory);
                                     setNewCategory('');
                                 }
                             }}
                             className="btn-secondary"
                             style={{
-                                padding: '0.5rem 1rem',
+                                padding: '0.5rem 0.85rem',
                                 borderRadius: '6px',
                                 border: '1px solid var(--border)',
                                 background: 'var(--accent)',
                                 color: 'var(--on-accent)',
                                 cursor: 'pointer',
                                 display: 'flex',
-                                alignItems: 'center'
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                fontSize: '0.85rem',
+                                fontWeight: 500
                             }}
                         >
-                            <Plus size={16} />
+                            <Plus size={15} />
+                            <span>Add</span>
                         </button>
                     </div>
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        {categories.map((cat, idx) => (
-                            <div key={idx} style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                background: 'var(--surface-solid)',
-                                border: '1px solid var(--border)',
-                                padding: '0.25rem 0.75rem',
-                                borderRadius: '20px',
-                                fontSize: '0.9rem',
-                                color: 'var(--text-secondary)'
-                            }}>
-                                {cat}
-                                <X
-                                    size={14}
-                                    style={{ cursor: 'pointer', color: 'var(--error)' }}
-                                    onClick={() => setCategories(categories.filter((_, i) => i !== idx))}
-                                />
+                    {/* Active Chosen Categories Bin */}
+                    {categories.length === 0 ? (
+                        <div style={{
+                            padding: '0.85rem',
+                            textAlign: 'center',
+                            fontSize: '0.8rem',
+                            color: 'var(--text-muted)',
+                            background: 'var(--surface-solid)',
+                            borderRadius: '8px',
+                            border: '1px dashed var(--border)'
+                        }}>
+                            No categories chosen. AI will automatically design a structure from your bookmarks, or you can add from the suggestions below.
+                        </div>
+                    ) : (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            {categories.map((cat, idx) => (
+                                <div key={idx} style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.45rem',
+                                    background: 'var(--surface-solid)',
+                                    border: '1px solid var(--border)',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '20px',
+                                    fontSize: '0.85rem',
+                                    color: 'var(--text-secondary)'
+                                }}>
+                                    <span>{cat}</span>
+                                    <X
+                                        size={14}
+                                        style={{ cursor: 'pointer', color: 'var(--error)' }}
+                                        onClick={() => handleRemoveCategory(idx)}
+                                        title={`Remove "${cat}"`}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Second List: Suggested Categories (Addable Pool) */}
+                    {availableSuggestions.length > 0 && (
+                        <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+                                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                    Suggested Categories
+                                </span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    Click + to add into chosen
+                                </span>
                             </div>
-                        ))}
-                    </div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+                                {availableSuggestions.map((sug) => (
+                                    <div
+                                        key={sug}
+                                        onClick={() => handleAddCategory(sug)}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem',
+                                            background: 'var(--surface-solid)',
+                                            border: '1px dashed var(--border)',
+                                            padding: '0.25rem 0.65rem',
+                                            borderRadius: '20px',
+                                            fontSize: '0.82rem',
+                                            color: 'var(--text-secondary)',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--success)';
+                                            e.currentTarget.style.color = 'var(--text-primary)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.borderColor = 'var(--border)';
+                                            e.currentTarget.style.color = 'var(--text-secondary)';
+                                        }}
+                                        title={`Add "${sug}" to chosen categories`}
+                                    >
+                                        <span>{sug}</span>
+                                        <Plus
+                                            size={14}
+                                            style={{ color: 'var(--success)', flexShrink: 0 }}
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

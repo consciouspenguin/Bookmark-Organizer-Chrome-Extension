@@ -4,6 +4,7 @@ import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
+import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES } from '../components/Organizer'
 
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
@@ -1075,6 +1076,22 @@ describe('OrganizerService flat chronological date sorting', () => {
             url: 'https://older.com'
         })
         expect(bookmarksExport.downloadBookmarks).not.toHaveBeenCalled()
+    })
+})
+
+describe('Category Presets and Suggestions', () => {
+    it('orders Work & Career first and Tech & Development last in default categories', () => {
+        expect(DEFAULT_CATEGORIES[0]).toBe('Work & Career')
+        expect(DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]).toBe('Tech & Development')
+    })
+
+    it('provides exactly 10 unique common suggested addable categories with no overlap in defaults', () => {
+        expect(SUGGESTED_ADDABLE_CATEGORIES).toHaveLength(10)
+        const uniqueSet = new Set(SUGGESTED_ADDABLE_CATEGORIES)
+        expect(uniqueSet.size).toBe(10)
+        for (const sug of SUGGESTED_ADDABLE_CATEGORIES) {
+            expect(DEFAULT_CATEGORIES).not.toContain(sug)
+        }
     })
 })
 
