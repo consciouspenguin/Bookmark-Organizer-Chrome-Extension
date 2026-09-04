@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService } from './organizer'
 import * as ai from './ai'
-import { classifyBatch } from './ai'
+import { classifyBatch, generateSchema, withRetry } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 
 describe('removeDuplicateUrls', () => {
@@ -327,6 +327,235 @@ describe('OrganizerService cleanTitles integration', () => {
         generateSchemaSpy.mockRestore()
         classifyBatchSpy.mockRestore()
         global.fetch = originalFetch
+    })
+})
+
+describe('withRetry resilient retry and cancellation', () => {
+    beforeEach(() => {
+        vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+        vi.useRealTimers()
+    })
+
+    it('retries rate-limit errors up to 8 attempts with progressive backoff and caps at 60s', async () => {
+        const rateLimitError = new Error('Resource exhausted / quota exceeded')
+        rateLimitError.statusCode = 429
+
+        const fn = vi.fn().mockRejectedValue(rateLimitError)
+        const onRetry = vi.fn()
+
+        const promise = withRetry(fn, 5, 1500, null, onRetry)
+        const rejection = expect(promise).rejects.toThrow('Resource exhausted / quota exceeded')
+
+        await vi.runAllTimersAsync()
+        await rejection
+
+        // 8 total attempts
+        expect(fn).toHaveBeenCalledTimes(8)
+        // 7 retry notifications
+        expect(onRetry).toHaveBeenCalledTimes(7)
+
+        for (let i = 0; i < 7; i++) {
+            const call = onRetry.mock.calls[i][0]
+            expect(call.attempt).toBe(i + 1)
+            expect(call.isRateLimit).toBe(true)
+            expect(call.error).toBe(rateLimitError)
+            expect(call.delayMs).toBeLessThanOrEqual(60000)
+
+            if (i === 0) {
+                // 5000 * 1.8^0 * [0.8, 1.2] = 4000 to 6000
+                expect(call.delayMs).toBeGreaterThanOrEqual(4000)
+                expect(call.delayMs).toBeLessThanOrEqual(6000)
+            }
+        }
+    })
+
+    it('respects error.retryAfterMs when provided on rate-limit errors', async () => {
+        const rateLimitError = new Error('Too many requests')
+        rateLimitError.statusCode = 429
+        rateLimitError.retryAfterMs = 12500
+
+        const fn = vi.fn()
+            .mockRejectedValueOnce(rateLimitError)
+            .mockResolvedValueOnce({ success: true })
+        const onRetry = vi.fn()
+
+        const promise = withRetry(fn, 5, 1500, null, onRetry)
+        await vi.runAllTimersAsync()
+        const result = await promise
+
+        expect(result).toEqual({ success: true })
+        expect(fn).toHaveBeenCalledTimes(2)
+        expect(onRetry).toHaveBeenCalledWith({
+            attempt: 1,
+            delayMs: 12500,
+            error: rateLimitError,
+            isRateLimit: true
+        })
+    })
+
+    it('uses standard exponential backoff up to maxRetries (5) for other retryable errors', async () => {
+        const serverError = new Error('Internal Server Error')
+        serverError.statusCode = 500
+
+        const fn = vi.fn().mockRejectedValue(serverError)
+        const onRetry = vi.fn()
+
+        const promise = withRetry(fn, 5, 1500, null, onRetry)
+        const rejection = expect(promise).rejects.toThrow('Internal Server Error')
+
+        await vi.runAllTimersAsync()
+        await rejection
+
+        expect(fn).toHaveBeenCalledTimes(5)
+        expect(onRetry).toHaveBeenCalledTimes(4)
+        onRetry.mock.calls.forEach(call => {
+            expect(call[0].isRateLimit).toBe(false)
+        })
+    })
+
+    it('throws immediately on non-retryable errors without retrying', async () => {
+        const badRequestError = new Error('Bad Request')
+        badRequestError.statusCode = 400
+
+        const fn = vi.fn().mockRejectedValue(badRequestError)
+        const onRetry = vi.fn()
+
+        await expect(withRetry(fn, 5, 1500, null, onRetry)).rejects.toThrow('Bad Request')
+        expect(fn).toHaveBeenCalledTimes(1)
+        expect(onRetry).not.toHaveBeenCalled()
+    })
+
+    it('aborts backoff sleep immediately when isCancelled returns true', async () => {
+        const error = new Error('Temporary gateway error')
+        error.statusCode = 502
+
+        let cancelled = false
+        const isCancelled = () => cancelled
+
+        const fn = vi.fn().mockRejectedValue(error)
+        const onRetry = vi.fn(() => {
+            // Cancel as soon as we enter the retry backoff
+            cancelled = true
+        })
+
+        const promise = withRetry(fn, 5, 1500, isCancelled, onRetry)
+        const rejection = expect(promise).rejects.toMatchObject({
+            message: 'Operation cancelled.',
+            isCancelled: true
+        })
+
+        // Advance only one 200ms sleep tick
+        await vi.advanceTimersByTimeAsync(200)
+        await rejection
+
+        expect(fn).toHaveBeenCalledTimes(1)
+    })
+})
+
+describe('classifyBatch and generateSchema default model and cancellation forwarding', () => {
+    const originalFetch = global.fetch
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.useRealTimers()
+    })
+
+    it('defaults model to google/gemini-3.1-flash-lite in classifyBatch', async () => {
+        let capturedPayload = null
+        global.fetch = vi.fn(async (url, options) => {
+            capturedPayload = JSON.parse(options.body)
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    classified: [{ i: 0, category: 'Tech', sub_category: 'Code' }]
+                                })
+                            }
+                        }
+                    ]
+                })
+            }
+        })
+
+        const bookmarks = [{ title: 'Code Site', url: 'https://code.example.com' }]
+        const schema = { categories: [{ name: 'Tech', sub_categories: ['Code'] }] }
+
+        await classifyBatch(bookmarks, 'sk-or-test-key', schema)
+
+        expect(capturedPayload.model).toBe('google/gemini-3.1-flash-lite')
+    })
+
+    it('defaults model to google/gemini-3.1-flash-lite in generateSchema', async () => {
+        let capturedPayload = null
+        global.fetch = vi.fn(async (url, options) => {
+            capturedPayload = JSON.parse(options.body)
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    categories: [{ name: 'Tech', sub_categories: ['General'] }]
+                                })
+                            }
+                        }
+                    ]
+                })
+            }
+        })
+
+        const bookmarks = [{ title: 'Code Site', url: 'https://code.example.com' }]
+        await generateSchema(bookmarks, 'sk-or-test-key', ['Tech'])
+
+        expect(capturedPayload.model).toBe('google/gemini-3.1-flash-lite')
+    })
+
+    it('forwards isCancelled and onRetry from classifyBatch to withRetry', async () => {
+        vi.useFakeTimers()
+
+        global.fetch = vi.fn(async () => ({
+            ok: false,
+            status: 429,
+            text: async () => 'Rate limit reached'
+        }))
+
+        let cancelled = false
+        const retryEvents = []
+
+        const bookmarks = [{ title: 'Example', url: 'https://example.com' }]
+        const schema = { categories: [{ name: 'General', sub_categories: [] }] }
+
+        const promise = classifyBatch(
+            bookmarks,
+            'sk-or-test-key',
+            schema,
+            'google/gemini-3.1-flash-lite',
+            false,
+            () => cancelled,
+            (evt) => {
+                retryEvents.push(evt)
+                cancelled = true
+            }
+        )
+        const rejection = expect(promise).rejects.toMatchObject({
+            message: 'Operation cancelled.',
+            isCancelled: true
+        })
+
+        await vi.advanceTimersByTimeAsync(200)
+        await rejection
+
+        expect(retryEvents.length).toBe(1)
+        expect(retryEvents[0].isRateLimit).toBe(true)
     })
 })
 

@@ -98,9 +98,11 @@ function isRetryableError(error, statusCode) {
     // succeeded but the response was unusable — a fresh attempt may differ.
     if (error?.retryable) return true;
 
+    const message = (error?.message || '').toLowerCase();
+    if (message.includes('rate') || message.includes('quota')) return true;
+
     if (!statusCode) {
         // Network/timeout errors are retryable
-        const message = error?.message || '';
         return message.includes('timeout') || message.includes('network') || message.includes('fetch');
     }
 
@@ -247,44 +249,87 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
     return parseModelResponse(await response.json());
 }
 
-// Generic retry wrapper with exponential backoff, jitter, and Retry-After header support
-async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000, onRetry = null) {
+// Generic retry wrapper with exponential backoff, rate-limit cooldowns, jitter, Retry-After header support, and cancellation
+export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCancelled = null, onRetry = null) {
     let lastError;
+    let attempt = 1;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const checkCancelled = () => {
+        if (!isCancelled) return false;
+        return typeof isCancelled === 'function' ? isCancelled() : Boolean(isCancelled);
+    };
+
+    while (true) {
+        if (checkCancelled()) {
+            const err = new Error('Operation cancelled.');
+            err.isCancelled = true;
+            throw err;
+        }
+
         try {
             return await fn();
         } catch (error) {
             lastError = error;
 
-            // Extract status code if available
-            const statusCode = error.statusCode || (error.message?.match(/(\d{3})/) ? parseInt(error.message.match(/(\d{3})/)[1]) : null);
-
-            // If not retryable or this was the last attempt, throw
-            if (!isRetryableError(error, statusCode) || attempt === maxRetries) {
+            if (error?.isCancelled) {
                 throw error;
             }
 
-            // Calculate delay: exponential backoff with jitter (0.75x to 1.25x)
-            const exponentialDelay = initialDelayMs * Math.pow(2, attempt - 1) * (0.75 + Math.random() * 0.5);
-            // Respect Retry-After header if provided by server, capped at 30 seconds
-            const delayMs = Math.min(30000, Math.max(exponentialDelay, error.retryAfterMs || 0));
-            console.log(`Attempt ${attempt} failed, retrying in ${Math.round(delayMs)}ms:`, error.message);
+            // Extract status code if available
+            const statusCode = error.statusCode || (error.message?.match(/(\d{3})/) ? parseInt(error.message.match(/(\d{3})/)[1], 10) : null);
+            const msgLower = (error?.message || '').toLowerCase();
+            const isRateLimit = statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota');
 
-            if (onRetry) {
-                onRetry({
-                    attempt,
-                    maxRetries,
-                    delayMs,
-                    error: error.message
-                });
+            const maxAttempts = isRateLimit ? 8 : maxRetries;
+
+            // If not retryable or this was the last attempt, throw
+            if ((!isRetryableError(error, statusCode) && !isRateLimit) || attempt >= maxAttempts) {
+                throw error;
             }
 
-            await new Promise(resolve => setTimeout(resolve, delayMs));
+            let delayMs;
+            if (isRateLimit) {
+                const progressive = 5000 * Math.pow(1.8, attempt - 1) * (0.8 + Math.random() * 0.4);
+                delayMs = (typeof error.retryAfterMs === 'number' && error.retryAfterMs > 0)
+                    ? error.retryAfterMs
+                    : Math.min(60000, progressive);
+            } else {
+                const exponentialDelay = initialDelayMs * Math.pow(2, attempt - 1) * (0.75 + Math.random() * 0.5);
+                delayMs = Math.min(30000, Math.max(exponentialDelay, error.retryAfterMs || 0));
+            }
+
+            console.log(`Attempt ${attempt} failed (${isRateLimit ? 'rate limit' : 'retryable'}), retrying in ${Math.round(delayMs)}ms:`, error.message);
+
+            if (typeof onRetry === 'function') {
+                try {
+                    onRetry({ attempt, maxRetries: maxAttempts, delayMs, error: error.message || error, isRateLimit });
+                } catch (cbErr) {
+                    console.error('Error in onRetry callback:', cbErr);
+                }
+            }
+
+            let elapsed = 0;
+            const stepMs = 200;
+            while (elapsed < delayMs) {
+                if (checkCancelled()) {
+                    const err = new Error('Operation cancelled.');
+                    err.isCancelled = true;
+                    throw err;
+                }
+                const sleepTime = Math.min(stepMs, delayMs - elapsed);
+                await new Promise(resolve => setTimeout(resolve, sleepTime));
+                elapsed += sleepTime;
+            }
+
+            if (checkCancelled()) {
+                const err = new Error('Operation cancelled.');
+                err.isCancelled = true;
+                throw err;
+            }
+
+            attempt++;
         }
     }
-
-    throw lastError;
 }
 
 // Schema design only needs a representative spread of the collection, not every
@@ -300,7 +345,7 @@ function sampleForSchema(bookmarks) {
     return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
-export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.8-flash", subfolderTarget = "5-10", onRetry = null) {
+export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", isCancelled = null, onRetry = null) {
     const subfolderRules = {
         '0-5': 'aim for roughly 3-5 sub-folders inside each category. Keep it minimal — only create subfolders for truly distinct groups. Err on the side of combining related items into broader folders.',
         '5-10': 'aim for roughly 5-10 sub-folders inside each category (about 7-8 is the sweet spot). Enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
@@ -358,13 +403,14 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
 
     return await withRetry(
         () => callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 }),
-        3,
-        1000,
+        5,
+        1500,
+        isCancelled,
         onRetry
     );
 }
 
-export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.8-flash", cleanTitles = false, onRetry = null) {
+export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", cleanTitles = false, isCancelled = null, onRetry = null) {
     const titleInstruction = cleanTitles
         ? `\n    6. Title cleanup: If clean_title is requested, provide a cleaned, human-readable title in the 'clean_title' field for each bookmark (strip site prefixes/suffixes like 'Login |', '- Wikipedia', query noise, or convert raw URL titles into clean titles). If the existing title is already clean, keep it as is.`
         : '';
@@ -418,6 +464,6 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
                 sub_category: entry?.sub_category || 'General'
             };
         });
-    }, 3, 1000, onRetry);
+    }, 5, 1500, isCancelled, onRetry);
 }
 
