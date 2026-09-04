@@ -88,6 +88,9 @@ export default function Organizer() {
         if (typeof chrome !== 'undefined' && chrome.storage) {
             chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'flatDateSort', 'dateSortOrder', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
+                if (result.categories && Array.isArray(result.categories) && result.categories.length > 0) {
+                    setCategories(result.categories)
+                }
                 if (result.selectedModel === 'google/gemini-2.5-pro') {
                     setSelectedModel('google/gemini-3.1-pro-preview')
                     chrome.storage.local.set({ selectedModel: 'google/gemini-3.1-pro-preview' })
@@ -104,6 +107,9 @@ export default function Organizer() {
                 if (result.dateSortOrder === 'asc' || result.dateSortOrder === 'desc') setDateSortOrder(result.dateSortOrder)
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
+
+            // Proactively remove legacy bloated organizedData from disk LevelDB to ensure instant startup
+            chrome.storage.local.remove('organizedData')
         }
     }, [])
 
@@ -214,15 +220,33 @@ export default function Organizer() {
             return
         }
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['organizedData'], (result) => {
-                if (result.organizedData && result.organizedData.length > 0) {
-                    organizedResultsRef.current = result.organizedData
-                    downloadBookmarks(result.organizedData)
+            const retrieve = (data) => {
+                if (data && data.length > 0) {
+                    organizedResultsRef.current = data
+                    downloadBookmarks(data)
                 } else {
                     setErrorMsg('No saved organized bookmarks found.')
                     setLastOrganized(null)
                 }
-            })
+            }
+
+            if (chrome.storage.session) {
+                chrome.storage.session.get(['organizedData'], (res) => {
+                    if (res?.organizedData && res.organizedData.length > 0) {
+                        retrieve(res.organizedData)
+                    } else if (chrome.storage.local) {
+                        chrome.storage.local.get(['organizedData'], (localRes) => {
+                            retrieve(localRes?.organizedData)
+                        })
+                    } else {
+                        retrieve(null)
+                    }
+                })
+            } else if (chrome.storage.local) {
+                chrome.storage.local.get(['organizedData'], (localRes) => {
+                    retrieve(localRes?.organizedData)
+                })
+            }
         }
     }, [])
 
@@ -342,11 +366,17 @@ export default function Organizer() {
                 const meta = { count: results.length, savedAt: Date.now(), stats };
                 setLastOrganized(meta);
                 if (typeof chrome !== 'undefined' && chrome.storage) {
-                    chrome.storage.local.set({ organizedData: results, organizedMeta: meta }, () => {
+                    // Save bookmark tree into memory-based session storage (RAM) so local LevelDB remains tiny (<5KB)
+                    if (chrome.storage.session) {
+                        try {
+                            chrome.storage.session.set({ organizedData: results });
+                        } catch { /* ignore session set errors */ }
+                    }
+                    chrome.storage.local.set({ organizedMeta: meta }, () => {
                         if (chrome.runtime.lastError) {
-                            addLog(`Could not save results for later download: ${chrome.runtime.lastError.message}`);
+                            addLog(`Could not save results metadata: ${chrome.runtime.lastError.message}`);
                         } else {
-                            addLog('Results saved — downloadable anytime, even after closing this panel.');
+                            addLog('Results saved — downloadable anytime during your browsing session.');
                         }
                     });
                 }

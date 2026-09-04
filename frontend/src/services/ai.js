@@ -338,9 +338,9 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
 }
 
 // Schema design only needs a representative spread of the collection, not every
-// bookmark. Beyond this limit the prompt would blow past model context windows
-// (e.g. 17k bookmarks ≈ several MB of prompt) and hang or fail the request.
-export const SCHEMA_SAMPLE_LIMIT = 1000;
+// bookmark. A sample of 200 bookmarks provides rich topical variance while keeping
+// prompt serialization and inference instantaneous (< 1-2s).
+export const SCHEMA_SAMPLE_LIMIT = 200;
 
 // Evenly spaced sample across the whole list. Bookmark exports are grouped by
 // folder, so spacing preserves topic variety better than taking the first N.

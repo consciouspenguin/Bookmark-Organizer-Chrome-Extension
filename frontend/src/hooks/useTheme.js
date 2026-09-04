@@ -15,26 +15,33 @@ function applyTheme(mode) {
     return resolved
 }
 
+function getInitialTheme() {
+    try {
+        return localStorage.getItem(STORAGE_KEY) || 'light';
+    } catch {
+        return 'light';
+    }
+}
+
 /**
  * Theme controller. Returns the chosen mode, the resolved theme actually
  * shown, and a setter. Persists to chrome.storage (with localStorage fallback)
  * and reacts to OS changes while in "system" mode.
  */
 export function useTheme() {
-    const [theme, setThemeState] = useState('light')
-    const [resolved, setResolved] = useState('light')
+    const [theme, setThemeState] = useState(getInitialTheme)
+    const [resolved, setResolved] = useState(() => applyTheme(getInitialTheme()))
 
-    // Initial load from storage
+    // Sync from chrome.storage if present
     useEffect(() => {
-        const init = (saved) => {
-            const mode = saved || 'light'
-            setThemeState(mode)
-            setResolved(applyTheme(mode))
-        }
-        if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get([STORAGE_KEY], (r) => init(r[STORAGE_KEY]))
-        } else {
-            init(localStorage.getItem(STORAGE_KEY))
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            chrome.storage.local.get([STORAGE_KEY], (r) => {
+                if (r && r[STORAGE_KEY]) {
+                    setThemeState(r[STORAGE_KEY])
+                    setResolved(applyTheme(r[STORAGE_KEY]))
+                    try { localStorage.setItem(STORAGE_KEY, r[STORAGE_KEY]) } catch { /* ignore */ }
+                }
+            })
         }
     }, [])
 
@@ -50,10 +57,9 @@ export function useTheme() {
     const setTheme = useCallback((mode) => {
         setThemeState(mode)
         setResolved(applyTheme(mode))
-        if (typeof chrome !== 'undefined' && chrome.storage) {
+        try { localStorage.setItem(STORAGE_KEY, mode) } catch { /* ignore */ }
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
             chrome.storage.local.set({ [STORAGE_KEY]: mode })
-        } else {
-            try { localStorage.setItem(STORAGE_KEY, mode) } catch { /* ignore */ }
         }
     }, [])
 
