@@ -93,7 +93,8 @@ export class OrganizerService {
             total: 0,
             duplicatesRemoved: 0,
             deadLinksArchived: 0,
-            categoriesCount: 0
+            categoriesCount: 0,
+            categoryBreakdown: {}
         };
     }
 
@@ -249,10 +250,10 @@ export class OrganizerService {
                     ({ delayMs, isRateLimit, attempt }) => {
                         const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
-                            status: 'retry',
+                            status: 'warning',
                             message: isRateLimit
-                                ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation — run still progressing in background...`
-                                : `Network issue during schema generation. Retrying in ${sec}s — run still progressing in background...`
+                                ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation...`
+                                : `Network issue during schema generation. Retrying in ${sec}s...`
                         });
                     }
                 );
@@ -323,10 +324,10 @@ export class OrganizerService {
                         ({ delayMs, isRateLimit, attempt }) => {
                             const sec = Math.ceil(delayMs / 1000);
                             this.onProgress({
-                                status: 'retry',
+                                status: 'warning',
                                 message: isRateLimit
-                                    ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${currentIdx + 1} — run still progressing in background...`
-                                    : `Network issue on batch ${currentIdx + 1}. Retrying in ${sec}s — run still progressing in background...`
+                                    ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${currentIdx + 1}...`
+                                    : `Network issue on batch ${currentIdx + 1}. Retrying in ${sec}s...`
                             });
                         }
                     );
@@ -461,14 +462,29 @@ export class OrganizerService {
             return null;
         }
 
-        // Compute summary statistics
+        // Compute summary statistics and flat category breakdown
+        const categoryBreakdown = {};
+        for (const item of finalResults) {
+            const cat = item.category || 'Other';
+            categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
+        }
+
         this.stats = {
             total: finalResults.length,
             duplicatesRemoved,
             deadLinksArchived: deadLinks.length,
-            categoriesCount: new Set(finalResults.map(r => r.category)).size
+            categoriesCount: Object.keys(categoryBreakdown).length,
+            categoryBreakdown
         };
         finalResults.stats = this.stats;
+
+        // Log flat category breakdown to terminal
+        this.onProgress({ status: 'info', message: 'Category breakdown:' });
+        Object.entries(categoryBreakdown)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .forEach(([category, count]) => {
+                this.onProgress({ status: 'info', message: `  • ${category}: ${count}` });
+            });
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;

@@ -307,7 +307,7 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
 
             if (typeof onRetry === 'function') {
                 try {
-                    onRetry({ attempt, maxRetries: maxAttempts, delayMs, error: error.message || error, isRateLimit });
+                    onRetry({ attempt, delayMs, error, isRateLimit });
                 } catch (cbErr) {
                     console.error('Error in onRetry callback:', cbErr);
                 }

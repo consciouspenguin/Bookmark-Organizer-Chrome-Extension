@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -14,6 +14,21 @@ export default function Organizer() {
     const [isCancelling, setIsCancelling] = useState(false)
     const organizedResultsRef = useRef(null)
     const [lastOrganized, setLastOrganized] = useState(null)
+    const [showSchema, setShowSchema] = useState(true)
+    const [showIdleSchema, setShowIdleSchema] = useState(false)
+    const [copiedSchema, setCopiedSchema] = useState(false)
+
+    const handleCopySchema = useCallback((breakdown) => {
+        if (!breakdown) return
+        const text = Object.entries(breakdown)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([cat, count]) => `${cat}: ${count}`)
+            .join('\n')
+        navigator.clipboard?.writeText(text).then(() => {
+            setCopiedSchema(true)
+            setTimeout(() => setCopiedSchema(false), 2000)
+        })
+    }, [])
 
     // API Key — single field accepts a Google AI Studio ("AIza...") or OpenRouter ("sk-or-...") key
     const [apiKey, setApiKey] = useState('')
@@ -270,6 +285,9 @@ export default function Organizer() {
                         setBackgroundNotice(data.message)
                     } else if (data.status === 'warning') {
                         addLog(data.message)
+                        if (data.message?.includes('Pausing') || data.message?.includes('Retrying') || data.message?.includes('background')) {
+                            setBackgroundNotice(data.message)
+                        }
                         if (data.message?.includes('cancelled')) {
                             setStatus('idle')
                             setIsCancelling(false)
@@ -738,49 +756,126 @@ export default function Organizer() {
             {/* Saved results from a previous run (persists across panel sessions) */}
             {status === 'idle' && lastOrganized && (
                 <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    padding: '0.75rem 1rem',
                     marginBottom: '2rem',
                     background: 'var(--surface-alt)',
                     border: '1px solid var(--border)',
                     borderRadius: '8px',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    overflow: 'hidden'
                 }}>
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        Last run: {lastOrganized.count.toLocaleString()} bookmarks organized
-                        {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
-                        {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
-                        <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '1rem',
+                        padding: '0.75rem 1rem'
+                    }}>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Last run: {lastOrganized.count.toLocaleString()} bookmarks organized
+                            {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
+                            {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
+                            <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            {lastOrganized.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowIdleSchema(!showIdleSchema)}
+                                    title="View category counts"
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem',
+                                        padding: '0.5rem 0.75rem',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border)',
+                                        background: 'var(--surface-solid)',
+                                        color: 'var(--text-secondary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.85rem',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    {showIdleSchema ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                    Schema
+                                </button>
+                            )}
+                            <button
+                                onClick={downloadOrganized}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.4rem',
+                                    padding: '0.5rem 0.9rem',
+                                    borderRadius: '6px',
+                                    border: 'none',
+                                    background: 'var(--accent)',
+                                    color: 'var(--on-accent)',
+                                    cursor: 'pointer',
+                                    fontSize: '0.85rem',
+                                    whiteSpace: 'nowrap'
+                                }}
+                            >
+                                <Download size={15} />
+                                Download
+                            </button>
+                        </div>
                     </div>
-                    <button
-                        onClick={downloadOrganized}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            padding: '0.5rem 0.9rem',
-                            borderRadius: '6px',
-                            border: 'none',
-                            background: 'var(--accent)',
-                            color: 'var(--on-accent)',
-                            cursor: 'pointer',
-                            fontSize: '0.85rem',
-                            whiteSpace: 'nowrap'
-                        }}
-                    >
-                        <Download size={15} />
-                        Download
-                    </button>
+                    {showIdleSchema && lastOrganized.stats?.categoryBreakdown && (
+                        <div style={{
+                            borderTop: '1px solid var(--border)',
+                            background: 'var(--surface-solid)',
+                            padding: '0.75rem 1rem'
+                        }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                                    Category Schema ({Object.keys(lastOrganized.stats.categoryBreakdown).length} categories)
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => handleCopySchema(lastOrganized.stats.categoryBreakdown)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem',
+                                        padding: '0.2rem 0.5rem',
+                                        borderRadius: '4px',
+                                        border: '1px solid var(--border)',
+                                        background: copiedSchema ? 'var(--success-soft)' : 'var(--surface-alt)',
+                                        color: copiedSchema ? 'var(--success)' : 'var(--text-secondary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.75rem'
+                                    }}
+                                >
+                                    {copiedSchema ? <Check size={12} /> : <Copy size={12} />}
+                                    {copiedSchema ? 'Copied' : 'Copy'}
+                                </button>
+                            </div>
+                            <div style={{
+                                maxHeight: '160px',
+                                overflowY: 'auto',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                fontSize: '0.8rem',
+                                lineHeight: '1.6'
+                            }}>
+                                {Object.entries(lastOrganized.stats.categoryBreakdown)
+                                    .sort(([a], [b]) => a.localeCompare(b))
+                                    .map(([category, count]) => (
+                                        <div key={category} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '1px 0' }}>
+                                            <span>{category}</span>
+                                            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{count}</span>
+                                        </div>
+                                    ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
             {/* Controls */}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
                 {status === 'complete' ? (
-                    <div style={{ textAlign: 'center' }}>
+                    <div style={{ textAlign: 'center', width: '100%' }}>
                         <div style={{ marginBottom: '0.75rem', color: 'var(--success)', fontSize: '1.2rem', fontWeight: 'bold' }}>
                             {uploadedFile ? "File Processed! Check your downloads." : 'All Done! Check your "AI Organized Bookmarks" folder.'}
                         </div>
@@ -792,7 +887,7 @@ export default function Organizer() {
                                 justifyContent: 'center',
                                 gap: '0.6rem',
                                 padding: '0.4rem 0.9rem',
-                                marginBottom: '1.25rem',
+                                marginBottom: '1rem',
                                 borderRadius: '20px',
                                 background: 'var(--surface-alt)',
                                 border: '1px solid var(--border)',
@@ -810,6 +905,91 @@ export default function Organizer() {
                                 )}
                                 <span>•</span>
                                 <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                            </div>
+                        )}
+                        {lastOrganized?.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
+                            <div style={{
+                                margin: '0 auto 1.25rem auto',
+                                maxWidth: '440px',
+                                textAlign: 'left',
+                                background: 'var(--surface-alt)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '10px',
+                                overflow: 'hidden'
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '0.6rem 0.9rem',
+                                    background: 'var(--surface-solid)',
+                                    borderBottom: showSchema ? '1px solid var(--border)' : 'none',
+                                    fontSize: '0.85rem',
+                                    fontWeight: '600',
+                                    color: 'var(--text-primary)'
+                                }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSchema(!showSchema)}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem',
+                                            background: 'none',
+                                            border: 'none',
+                                            padding: 0,
+                                            color: 'inherit',
+                                            cursor: 'pointer',
+                                            fontSize: 'inherit',
+                                            fontWeight: 'inherit'
+                                        }}
+                                    >
+                                        {showSchema ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                        <span>Category Schema ({Object.keys(lastOrganized.stats.categoryBreakdown).length})</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopySchema(lastOrganized.stats.categoryBreakdown)}
+                                        title="Copy category list as plain text"
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.3rem',
+                                            padding: '0.25rem 0.6rem',
+                                            borderRadius: '5px',
+                                            border: '1px solid var(--border)',
+                                            background: copiedSchema ? 'var(--success-soft)' : 'var(--surface-alt)',
+                                            color: copiedSchema ? 'var(--success)' : 'var(--text-secondary)',
+                                            cursor: 'pointer',
+                                            fontSize: '0.75rem',
+                                            fontWeight: '500',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                    >
+                                        {copiedSchema ? <Check size={13} /> : <Copy size={13} />}
+                                        {copiedSchema ? 'Copied' : 'Copy'}
+                                    </button>
+                                </div>
+                                {showSchema && (
+                                    <div style={{
+                                        padding: '0.6rem 0.9rem',
+                                        maxHeight: '180px',
+                                        overflowY: 'auto',
+                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                        fontSize: '0.8rem',
+                                        lineHeight: '1.6',
+                                        color: 'var(--text-primary)'
+                                    }}>
+                                        {Object.entries(lastOrganized.stats.categoryBreakdown)
+                                            .sort(([a], [b]) => a.localeCompare(b))
+                                            .map(([category, count]) => (
+                                                <div key={category} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', padding: '1px 0' }}>
+                                                    <span>{category}</span>
+                                                    <span style={{ color: 'var(--accent)', fontWeight: '600' }}>{count}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                         {lastOrganized && (

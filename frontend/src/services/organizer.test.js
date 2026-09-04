@@ -773,6 +773,48 @@ describe('OrganizerService resilient batch processing and sub-batch subdivision'
         expect(results).toHaveLength(20)
         expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
     })
+
+    it('computes categoryBreakdown in stats and logs flat category tally to onProgress', async () => {
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [
+                { name: 'Tech', sub_categories: [] },
+                { name: 'News', sub_categories: [] }
+            ]
+        })
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
+            { title: 'Site 1', url: 'https://site1.com', category: 'Tech', sub_category: 'Code' },
+            { title: 'Site 2', url: 'https://site2.com', category: 'Tech', sub_category: 'Tools' },
+            { title: 'Site 3', url: 'https://site3.com', category: 'News', sub_category: 'Daily' }
+        ])
+
+        const bookmarks = [
+            { title: 'Site 1', url: 'https://site1.com' },
+            { title: 'Site 2', url: 'https://site2.com' },
+            { title: 'Site 3', url: 'https://site3.com' }
+        ]
+
+        const service = new OrganizerService('test-key', ['Tech', 'News'], onProgress)
+        const results = await service.start(bookmarks)
+
+        expect(service.stats.categoryBreakdown).toEqual({
+            Tech: 2,
+            News: 1
+        })
+        expect(results.stats.categoryBreakdown).toEqual({
+            Tech: 2,
+            News: 1
+        })
+        expect(progressMessages).toContain('Category breakdown:')
+        expect(progressMessages).toContain('  • News: 1')
+        expect(progressMessages).toContain('  • Tech: 2')
+    })
 })
 
 describe('geminiModelId provider mapping and legacy model aliasing', () => {
