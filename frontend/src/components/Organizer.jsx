@@ -48,6 +48,9 @@ export default function Organizer() {
     // Keep only one copy of each exact URL in the organized output.
     const [removeDuplicates, setRemoveDuplicates] = useState(true)
 
+    // Clean messy or truncated titles with AI
+    const [cleanTitles, setCleanTitles] = useState(false)
+
     // Subfolder Target Size
     const [subfolderTarget, setSubfolderTarget] = useState('5-10')
     const subfolderOptions = useMemo(() => [
@@ -62,12 +65,13 @@ export default function Organizer() {
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['apiKey', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'organizedMeta'], (result) => {
+            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.selectedModel) setSelectedModel(result.selectedModel)
                 if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
                 if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
+                if (result.cleanTitles !== undefined) setCleanTitles(Boolean(result.cleanTitles))
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
         }
@@ -103,6 +107,11 @@ export default function Organizer() {
     const handleRemoveDuplicatesToggle = useCallback((enabled) => {
         setRemoveDuplicates(enabled)
         updateSetting('removeDuplicates', enabled)
+    }, [updateSetting])
+
+    const handleCleanTitlesToggle = useCallback((enabled) => {
+        setCleanTitles(enabled)
+        updateSetting('cleanTitles', enabled)
     }, [updateSetting])
 
     // File Upload Handlers
@@ -203,7 +212,8 @@ export default function Organizer() {
                 { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
                 { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
                 { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
-                { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() }
+                { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() },
+                { message: `Clean Bookmark Titles: ${cleanTitles ? 'On' : 'Off'}`, timestamp: new Date() }
             ])
             setProgress(0)
             setErrorMsg('')
@@ -238,7 +248,8 @@ export default function Organizer() {
                 selectedModel,
                 subfolderTarget,
                 sortAlphabetically,
-                removeDuplicates
+                removeDuplicates,
+                cleanTitles
             )
 
             // Pass parsed bookmarks if file mode, otherwise null (browser mode)
@@ -265,7 +276,7 @@ export default function Organizer() {
             setErrorMsg("Failed to start process.")
             setStatus('error')
         }
-    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates])
+    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates, cleanTitles])
 
     return (
         <div className="glass-panel" style={{ width: '100%', padding: '2rem', textAlign: 'left', boxSizing: 'border-box' }}>
@@ -466,6 +477,49 @@ export default function Organizer() {
                             height: '18px',
                             borderRadius: '50%',
                             background: removeDuplicates ? 'var(--on-accent)' : 'var(--text-muted)',
+                            transition: 'left 0.2s ease'
+                        }} />
+                    </button>
+                </div>
+            )}
+
+            {/* Clean Titles Toggle */}
+            {status === 'idle' && (
+                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                    <div>
+                        <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
+                            Clean Titles with AI
+                        </label>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                            Rewrites messy or truncated titles
+                        </div>
+                    </div>
+                    <button
+                        role="switch"
+                        aria-label="Clean Titles with AI"
+                        aria-checked={cleanTitles}
+                        onClick={() => handleCleanTitlesToggle(!cleanTitles)}
+                        style={{
+                            width: '44px',
+                            height: '24px',
+                            borderRadius: '12px',
+                            border: '1px solid var(--border)',
+                            background: cleanTitles ? 'var(--accent)' : 'var(--surface-solid)',
+                            position: 'relative',
+                            cursor: 'pointer',
+                            padding: 0,
+                            flexShrink: 0,
+                            transition: 'background 0.2s ease'
+                        }}
+                    >
+                        <span style={{
+                            position: 'absolute',
+                            top: '2px',
+                            left: cleanTitles ? '22px' : '2px',
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            background: cleanTitles ? 'var(--on-accent)' : 'var(--text-muted)',
                             transition: 'left 0.2s ease'
                         }} />
                     </button>
