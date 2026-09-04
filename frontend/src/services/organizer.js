@@ -350,21 +350,12 @@ export class OrganizerService {
             return finalResults;
         }
 
-        // Fast link reachability check: isolate unreachable URLs so they bypass AI classification
-        this.onProgress({ status: 'info', message: 'Scanning link reachability...' });
-        const { activeLinks, deadLinks } = await filterReachableBookmarks(allLinks, this.onProgress, () => this.isCancelled);
-
-        if (this.isCancelled) {
-            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
-            return null;
-        }
-
-        if (deadLinks.length > 0) {
-            this.onProgress({
-                status: 'info',
-                message: `Isolated ${deadLinks.length} unreachable bookmark${deadLinks.length === 1 ? '' : 's'} under Archive → Broken Links.`
-            });
-        }
+        // Bypassing network reachability probe on arbitrary bookmark URLs in Chrome extension context:
+        // External websites returning HTTP 'Link: ... rel="modulepreload"' or 'rel="preload"' response headers
+        // cause the browser to attempt preloading scripts into the extension's index.html context,
+        // violating Manifest V3 Content Security Policy (script-src 'self'). All bookmarks are classified directly.
+        const activeLinks = allLinks;
+        const deadLinks = [];
 
         let classifiedActive = [];
 
