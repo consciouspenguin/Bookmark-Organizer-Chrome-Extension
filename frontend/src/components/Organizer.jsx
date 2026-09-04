@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -11,6 +11,7 @@ export default function Organizer() {
     const [progress, setProgress] = useState(0)
     const [errorMsg, setErrorMsg] = useState('')
     const [backgroundNotice, setBackgroundNotice] = useState('')
+    const [isCancelling, setIsCancelling] = useState(false)
     const organizedResultsRef = useRef(null)
     const [lastOrganized, setLastOrganized] = useState(null)
 
@@ -19,42 +20,28 @@ export default function Organizer() {
     const provider = useMemo(() => detectProvider(apiKey), [apiKey])
 
     // Model Selection — Gemini Flash & Flash-Lite models (OpenRouter + Google AI Studio)
-    const [selectedModel, setSelectedModel] = useState('google/gemini-3.8-flash')
+    const [selectedModel, setSelectedModel] = useState('google/gemini-3.1-flash-lite')
     const models = useMemo(() => [
-        {
-            id: 'google/gemini-3.8-flash',
-            name: '3.8 Flash',
-            badge: 'Recommended',
-            label: '3.8 Flash (Recommended)',
-            description: '3.8 Flash: Recommended default — highest accuracy and speed for categorization.'
-        },
         {
             id: 'google/gemini-3.1-flash-lite',
             name: '3.1 Flash Lite',
             badge: 'Fast & Cheap',
             label: '3.1 Flash Lite (Fast & Cheap)',
-            description: '3.1 Flash Lite: Ultra-fast and lowest token cost for large bookmark collections.'
+            description: '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'
         },
         {
-            id: 'google/gemini-3.7-flash',
-            name: '3.7 Flash',
-            badge: '',
-            label: '3.7 Flash',
-            description: '3.7 Flash: Advanced hybrid reasoning model with strong taxonomy performance.'
-        },
-        {
-            id: 'google/gemini-2.5-flash',
-            name: '2.5 Flash',
-            badge: '',
-            label: '2.5 Flash',
-            description: '2.5 Flash: Reliable, fast, and stable standard Flash model.'
+            id: 'google/gemini-3.8-flash',
+            name: '3.8 Flash',
+            badge: 'High Accuracy',
+            label: '3.8 Flash (High Accuracy)',
+            description: '3.8 Flash: Highest taxonomy accuracy with fast response times.'
         },
         {
             id: 'google/gemini-2.5-pro',
             name: '2.5 Pro',
-            badge: '',
-            label: '2.5 Pro',
-            description: '2.5 Pro: Deepest reasoning model for complex or ambiguous bookmark trees.'
+            badge: 'Deep Reasoning',
+            label: '2.5 Pro (Deep Reasoning)',
+            description: '2.5 Pro: Deepest reasoning model for intricate or ambiguous bookmark hierarchies.'
         }
     ], [])
 
@@ -97,7 +84,11 @@ export default function Organizer() {
         if (typeof chrome !== 'undefined' && chrome.storage) {
             chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
-                if (result.selectedModel) setSelectedModel(result.selectedModel)
+                if (result.selectedModel && ['google/gemini-3.1-flash-lite', 'google/gemini-3.8-flash', 'google/gemini-2.5-pro'].includes(result.selectedModel)) {
+                    setSelectedModel(result.selectedModel)
+                } else {
+                    setSelectedModel('google/gemini-3.1-flash-lite')
+                }
                 if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
                 if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
@@ -216,7 +207,19 @@ export default function Organizer() {
         }
     }, [])
 
+    const handleCancel = useCallback(() => {
+        if (organizerRef.current) {
+            organizerRef.current.cancel();
+            setIsCancelling(true);
+            addLog('Cancellation requested — halting operations...');
+        }
+    }, [addLog]);
+
     const resetApp = useCallback(() => {
+        if (organizerRef.current) {
+            organizerRef.current.cancel();
+        }
+        setIsCancelling(false);
         setStatus('idle')
         setLogs([])
         setProgress(0)
@@ -232,6 +235,8 @@ export default function Organizer() {
             setErrorMsg(`Please enter your Google AI Studio or OpenRouter API Key.`)
             return
         }
+
+        setIsCancelling(false)
 
         try {
             setStatus('processing')
@@ -262,6 +267,10 @@ export default function Organizer() {
                         setBackgroundNotice(data.message)
                     } else if (data.status === 'warning') {
                         addLog(data.message)
+                        if (data.message?.includes('cancelled')) {
+                            setStatus('idle')
+                            setIsCancelling(false)
+                        }
                     } else if (data.status === 'error') {
                         setErrorMsg(data.message)
                         setBackgroundNotice('')
@@ -285,6 +294,12 @@ export default function Organizer() {
             // Pass parsed bookmarks if file mode, otherwise null (browser mode)
             const results = await organizerRef.current.start(parsedBookmarks)
 
+            if (organizerRef.current?.isCancelled || !results) {
+                setStatus('idle')
+                setIsCancelling(false)
+                return
+            }
+
             if (results && results.length > 0) {
                 organizedResultsRef.current = results
                 const stats = organizerRef.current?.stats || results.stats || null
@@ -305,6 +320,8 @@ export default function Organizer() {
             console.error(err)
             setErrorMsg("Failed to start process.")
             setStatus('error')
+        } finally {
+            setIsCancelling(false)
         }
     }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates, cleanTitles])
 
@@ -405,7 +422,7 @@ export default function Organizer() {
                         ))}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', lineHeight: '1.4' }}>
-                        {models.find(m => m.id === selectedModel)?.description || '3.8 Flash: Recommended default — highest accuracy and speed for categorization.'}
+                        {models.find(m => m.id === selectedModel)?.description || '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'}
                     </div>
                 </div>
             )}
@@ -820,30 +837,61 @@ export default function Organizer() {
                             Organize Again
                         </div>
                     </div>
+                ) : status === 'processing' ? (
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            className="btn-primary btn-in-progress"
+                            disabled
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                cursor: 'wait'
+                            }}
+                        >
+                            <Loader2 size={18} className="spin-icon" />
+                            <span>In Progress... {progress}%</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCancel}
+                            disabled={isCancelling}
+                            title="Cancel the organization process"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '0.8rem 1.25rem',
+                                borderRadius: '10px',
+                                border: '1px solid var(--error)',
+                                background: 'var(--error-soft)',
+                                color: 'var(--error)',
+                                fontWeight: '600',
+                                fontSize: '0.95rem',
+                                cursor: isCancelling ? 'not-allowed' : 'pointer',
+                                opacity: isCancelling ? 0.6 : 1,
+                                transition: 'all 0.2s ease'
+                            }}
+                        >
+                            <Square size={16} fill="currentColor" />
+                            {isCancelling ? 'Cancelling...' : 'Cancel'}
+                        </button>
+                    </div>
                 ) : (
                     <button
-                        className={`btn-primary ${status === 'processing' ? 'btn-in-progress' : ''}`}
+                        className="btn-primary"
                         onClick={startProcess}
-                        disabled={!apiKey || status === 'processing'}
+                        disabled={!apiKey}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            opacity: (!apiKey) ? 0.5 : 1,
-                            cursor: (!apiKey) ? 'not-allowed' : (status === 'processing' ? 'wait' : 'pointer')
+                            opacity: !apiKey ? 0.5 : 1,
+                            cursor: !apiKey ? 'not-allowed' : 'pointer'
                         }}
                     >
-                        {status === 'processing' ? (
-                            <>
-                                <Loader2 size={18} className="spin-icon" />
-                                <span>In Progress... {progress}%</span>
-                            </>
-                        ) : (
-                            <>
-                                {uploadedFile ? <FileText size={20} /> : <Bookmark size={20} />}
-                                {uploadedFile ? 'Organize File & Download' : 'Organize My Bookmarks'}
-                            </>
-                        )}
+                        {uploadedFile ? <FileText size={20} /> : <Bookmark size={20} />}
+                        {uploadedFile ? 'Organize File & Download' : 'Organize My Bookmarks'}
                     </button>
                 )}
             </div>
