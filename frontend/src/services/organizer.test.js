@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService } from './organizer'
+import * as ai from './ai'
 import { classifyBatch } from './ai'
+import * as bookmarksExport from './bookmarks_export'
 
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
@@ -187,3 +189,144 @@ describe('classifyBatch cleanTitles option', () => {
         expect(capturedBody.messages[1].content).toContain('{ "classified": [ { "i": 0, "category": "...", "sub_category": "...", "clean_title": "..." } ] }')
     })
 })
+
+describe('OrganizerService cleanTitles integration', () => {
+    it('defaults cleanTitles to false when omitted', () => {
+        const service = new OrganizerService('test-key', [], () => {})
+        expect(service.cleanTitles).toBe(false)
+    })
+
+    it('stores cleanTitles as true when passed in constructor', () => {
+        const service = new OrganizerService('test-key', [], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, true)
+        expect(service.cleanTitles).toBe(true)
+    })
+
+    it('passes cleanTitles as false by default to classifyBatch during start()', async () => {
+        const originalFetch = global.fetch
+        global.fetch = vi.fn(async () => ({ ok: true }))
+
+        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
+        })
+        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
+            { title: 'Original Tech', url: 'https://example.com', category: 'Tech', sub_category: 'Coding' }
+        ])
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {})
+
+        const bookmarks = [{ title: 'Original Tech', url: 'https://example.com' }]
+        await service.start(bookmarks)
+
+        expect(classifyBatchSpy).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ url: 'https://example.com' })]),
+            'test-key',
+            expect.any(Object),
+            'google/gemini-3.1-flash-lite',
+            false
+        )
+
+        downloadBookmarksSpy.mockRestore()
+        generateSchemaSpy.mockRestore()
+        classifyBatchSpy.mockRestore()
+        global.fetch = originalFetch
+    })
+
+    it('passes cleanTitles to classifyBatch during start() in main worker pass', async () => {
+        const originalFetch = global.fetch
+        global.fetch = vi.fn(async () => ({ ok: true }))
+
+        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
+        })
+        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
+            { title: 'Clean Tech', url: 'https://example.com', category: 'Tech', sub_category: 'Coding' }
+        ])
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            true
+        )
+
+        const bookmarks = [{ title: 'Messy Tech Site', url: 'https://example.com' }]
+        await service.start(bookmarks)
+
+        expect(classifyBatchSpy).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ url: 'https://example.com' })]),
+            'test-key',
+            expect.any(Object),
+            'google/gemini-3.1-flash-lite',
+            true
+        )
+
+        downloadBookmarksSpy.mockRestore()
+        generateSchemaSpy.mockRestore()
+        classifyBatchSpy.mockRestore()
+        global.fetch = originalFetch
+    })
+
+    it('passes cleanTitles to classifyBatch during retry pass for failed batches', async () => {
+        const originalFetch = global.fetch
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        global.fetch = vi.fn(async () => ({ ok: true }))
+
+        const downloadBookmarksSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        const generateSchemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
+        })
+        // First call fails (triggering retry pass), second call succeeds
+        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch')
+            .mockRejectedValueOnce(new Error('Rate limit or network drop'))
+            .mockResolvedValueOnce([
+                { title: 'Clean Tech', url: 'https://example.com', category: 'Tech', sub_category: 'Coding' }
+            ])
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            true
+        )
+
+        const bookmarks = [{ title: 'Messy Tech Site', url: 'https://example.com' }]
+        await service.start(bookmarks)
+
+        // classifyBatch should have been called twice: initial pass and retry pass
+        expect(classifyBatchSpy).toHaveBeenCalledTimes(2)
+        // Both calls must have received cleanTitles = true as the 5th argument
+        expect(classifyBatchSpy).toHaveBeenNthCalledWith(
+            1,
+            expect.any(Array),
+            'test-key',
+            expect.any(Object),
+            'google/gemini-3.1-flash-lite',
+            true
+        )
+        expect(classifyBatchSpy).toHaveBeenNthCalledWith(
+            2,
+            expect.any(Array),
+            'test-key',
+            expect.any(Object),
+            'google/gemini-3.1-flash-lite',
+            true
+        )
+
+        consoleErrorSpy.mockRestore()
+        downloadBookmarksSpy.mockRestore()
+        generateSchemaSpy.mockRestore()
+        classifyBatchSpy.mockRestore()
+        global.fetch = originalFetch
+    })
+})
+
