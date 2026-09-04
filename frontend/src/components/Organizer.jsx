@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -10,6 +10,7 @@ export default function Organizer() {
     const [logs, setLogs] = useState([])
     const [progress, setProgress] = useState(0)
     const [errorMsg, setErrorMsg] = useState('')
+    const [backgroundNotice, setBackgroundNotice] = useState('')
     const organizedResultsRef = useRef(null)
     const [lastOrganized, setLastOrganized] = useState(null)
 
@@ -181,6 +182,7 @@ export default function Organizer() {
         setLogs([])
         setProgress(0)
         setErrorMsg('')
+        setBackgroundNotice('')
         setUploadedFile(null)
         setParsedBookmarks(null)
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -205,6 +207,7 @@ export default function Organizer() {
             ])
             setProgress(0)
             setErrorMsg('')
+            setBackgroundNotice('')
 
             organizerRef.current = new OrganizerService(
                 apiKey,
@@ -214,15 +217,20 @@ export default function Organizer() {
                         addLog(data.message)
                     } else if (data.status === 'progress') {
                         setProgress(data.percent)
+                    } else if (data.status === 'retry') {
+                        addLog(data.message)
+                        setBackgroundNotice(data.message)
                     } else if (data.status === 'warning') {
                         addLog(data.message)
                     } else if (data.status === 'error') {
                         setErrorMsg(data.message)
+                        setBackgroundNotice('')
                         setStatus('error')
                     } else if (data.status === 'success') {
                         addLog(data.message)
                     } else if (data.status === 'done') {
                         addLog(data.message)
+                        setBackgroundNotice('')
                         setStatus('complete')
                         setProgress(100)
                     }
@@ -713,19 +721,22 @@ export default function Organizer() {
                     </div>
                 ) : (
                     <button
-                        className="btn-primary"
+                        className={`btn-primary ${status === 'processing' ? 'btn-in-progress' : ''}`}
                         onClick={startProcess}
                         disabled={!apiKey || status === 'processing'}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.5rem',
-                            opacity: (!apiKey || status === 'processing') ? 0.5 : 1,
-                            cursor: (!apiKey || status === 'processing') ? 'not-allowed' : 'pointer'
+                            opacity: (!apiKey) ? 0.5 : 1,
+                            cursor: (!apiKey) ? 'not-allowed' : (status === 'processing' ? 'wait' : 'pointer')
                         }}
                     >
                         {status === 'processing' ? (
-                            <>Processing... {progress}%</>
+                            <>
+                                <Loader2 size={18} className="spin-icon" />
+                                <span>In Progress... {progress}%</span>
+                            </>
                         ) : (
                             <>
                                 {uploadedFile ? <FileText size={20} /> : <Bookmark size={20} />}
@@ -735,6 +746,27 @@ export default function Organizer() {
                     </button>
                 )}
             </div>
+
+            {/* Background Ongoing Progress / Transient Retry Notification */}
+            {status === 'processing' && backgroundNotice && (
+                <div style={{
+                    background: 'var(--success-soft)',
+                    border: '1px solid var(--success)',
+                    color: 'var(--success)',
+                    padding: '0.85rem 1rem',
+                    borderRadius: '8px',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    fontSize: '0.85rem'
+                }}>
+                    <RefreshCw size={18} className="spin-icon" style={{ flexShrink: 0 }} />
+                    <div>
+                        <strong>Background Run Active:</strong> {backgroundNotice}
+                    </div>
+                </div>
+            )}
 
             {/* Error Message */}
             {errorMsg && (

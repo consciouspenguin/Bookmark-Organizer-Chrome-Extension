@@ -184,7 +184,19 @@ export class OrganizerService {
 
             let schema;
             try {
-                schema = await generateSchema(activeLinks, this.apiKey, this.categories, this.model, this.subfolderTarget);
+                schema = await generateSchema(
+                    activeLinks,
+                    this.apiKey,
+                    this.categories,
+                    this.model,
+                    this.subfolderTarget,
+                    ({ attempt, maxRetries, delayMs, error }) => {
+                        this.onProgress({
+                            status: 'retry',
+                            message: `Schema generation encounter: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run is still progressing in background...`
+                        });
+                    }
+                );
                 this.onProgress({ status: 'info', message: 'Generated category schema:' });
                 if (schema && schema.categories) {
                     schema.categories.forEach(cat => {
@@ -233,7 +245,18 @@ export class OrganizerService {
                 });
 
                 try {
-                    const classified = await classifyBatch(batchData, this.apiKey, schema, this.model);
+                    const classified = await classifyBatch(
+                        batchData,
+                        this.apiKey,
+                        schema,
+                        this.model,
+                        ({ attempt, maxRetries, delayMs, error }) => {
+                            this.onProgress({
+                                status: 'retry',
+                                message: `Batch ${currentIdx + 1} request error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
+                            });
+                        }
+                    );
 
                     // Accumulate results
                     results[index] = classified;
@@ -243,7 +266,7 @@ export class OrganizerService {
                 } catch (err) {
                     console.error(`Batch ${currentIdx + 1} failed:`, err);
                     failedBatches.push({ index, batchData, label: currentIdx + 1 });
-                    this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass.` });
+                    this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass. Continuing remaining batches in background...` });
                 }
 
                 await processNext();
@@ -264,7 +287,18 @@ export class OrganizerService {
 
                 this.onProgress({ status: 'processing', message: `Retrying batch ${label}/${batches.length}...` });
                 try {
-                    results[index] = await classifyBatch(batchData, this.apiKey, schema, this.model);
+                    results[index] = await classifyBatch(
+                        batchData,
+                        this.apiKey,
+                        schema,
+                        this.model,
+                        ({ attempt, maxRetries, delayMs, error }) => {
+                            this.onProgress({
+                                status: 'retry',
+                                message: `Batch ${label} retry error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
+                            });
+                        }
+                    );
                 } catch (err) {
                     console.error(`Batch ${label} failed on second pass:`, err);
                     results[index] = batchData.map(b => ({ title: b.title, url: b.url, category: 'Other', sub_category: 'General' }));

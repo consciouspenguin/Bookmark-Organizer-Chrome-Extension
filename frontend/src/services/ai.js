@@ -248,7 +248,7 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
 }
 
 // Generic retry wrapper with exponential backoff, jitter, and Retry-After header support
-async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000) {
+async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000, onRetry = null) {
     let lastError;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -271,6 +271,15 @@ async function withRetry(fn, maxRetries = 3, initialDelayMs = 1000) {
             const delayMs = Math.min(30000, Math.max(exponentialDelay, error.retryAfterMs || 0));
             console.log(`Attempt ${attempt} failed, retrying in ${Math.round(delayMs)}ms:`, error.message);
 
+            if (onRetry) {
+                onRetry({
+                    attempt,
+                    maxRetries,
+                    delayMs,
+                    error: error.message
+                });
+            }
+
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
     }
@@ -291,7 +300,7 @@ function sampleForSchema(bookmarks) {
     return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
-export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10") {
+export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", onRetry = null) {
     const subfolderRules = {
         '0-5': 'aim for roughly 3-5 sub-folders inside each category. Keep it minimal — only create subfolders for truly distinct groups. Err on the side of combining related items into broader folders.',
         '5-10': 'aim for roughly 5-10 sub-folders inside each category (about 7-8 is the sweet spot). Enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
@@ -347,12 +356,15 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
 
     const systemContent = "You are an expert information architect and precise JSON generator. Output only valid JSON. Do not use Markdown blocks.";
 
-    return await withRetry(() =>
-        callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 })
+    return await withRetry(
+        () => callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 }),
+        3,
+        1000,
+        onRetry
     );
 }
 
-export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite") {
+export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", onRetry = null) {
     const prompt = `
     Classify these ${bookmarks.length} bookmarks into the fixed folder structure below.
 
@@ -394,6 +406,6 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
             category: byIndex.get(i)?.category || 'Other',
             sub_category: byIndex.get(i)?.sub_category || 'General'
         }));
-    });
+    }, 3, 1000, onRetry);
 }
 
