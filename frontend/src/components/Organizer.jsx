@@ -498,6 +498,7 @@ export default function Organizer() {
                         if (data.message) addLog(data.message);
                         if (typeof data.percent === 'number') setProgress(data.percent);
                     } else if (data.status === 'progress') {
+                        if (data.message) addLog(data.message);
                         setProgress(data.percent);
                         if (data.clearNotice) {
                             setBackgroundNotice('');
@@ -581,10 +582,10 @@ export default function Organizer() {
     const canStart = (flatDateSort && !cleanTitles) || Boolean(apiKey);
 
     return (
-        <div className="glass-panel" style={{ width: '100%', padding: '2rem', textAlign: 'left', boxSizing: 'border-box' }}>
+        <div className="glass-panel main-glass-panel">
 
             {/* API Key Input */}
-            <div style={{ marginBottom: '2rem' }}>
+            <div className="section-block">
                 <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
                     API Key {(!flatDateSort || cleanTitles) ? <span style={{ color: 'var(--error)' }}>*</span> : null}
                     <span style={{ marginLeft: '0.5rem', color: 'var(--text-muted)', fontWeight: '400' }}>
@@ -684,51 +685,27 @@ export default function Organizer() {
 
             {/* Model Selector */}
             {status === 'idle' && (!flatDateSort || cleanTitles) && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                <div className="card-panel section-block">
                     <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
                         Select AI Model
                     </label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', padding: '0.4rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    <div className="model-selector-grid">
                         {models.map((model) => (
                             <button
                                 key={model.id}
                                 onClick={() => handleModelChange(model.id)}
-                                style={{
-                                    flex: '1 1 85px',
-                                    minWidth: '70px',
-                                    padding: '0.6rem 0.4rem',
-                                    borderRadius: '6px',
-                                    border: 'none',
-                                    background: selectedModel === model.id ? 'var(--accent-gradient)' : 'transparent',
-                                    color: selectedModel === model.id ? 'var(--on-accent)' : 'var(--text-secondary)',
-                                    cursor: 'pointer',
-                                    fontSize: '0.82rem',
-                                    fontWeight: selectedModel === model.id ? '600' : '500',
-                                    transition: 'all 0.2s ease',
-                                    boxShadow: selectedModel === model.id ? '0 1px 10px var(--accent-glow)' : 'none',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '2px',
-                                    textAlign: 'center'
-                                }}
+                                className={`model-select-btn ${selectedModel === model.id ? 'active' : ''}`}
                             >
-                                <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{model.name}</span>
+                                <span className="model-name">{model.name}</span>
                                 {model.badge && (
-                                    <span style={{
-                                        fontSize: '0.68rem',
-                                        opacity: selectedModel === model.id ? 0.95 : 0.75,
-                                        fontWeight: 400,
-                                        whiteSpace: 'nowrap'
-                                    }}>
+                                    <span className="model-badge">
                                         ({model.badge})
                                     </span>
                                 )}
                             </button>
                         ))}
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem', lineHeight: '1.4' }}>
+                    <div className="model-desc">
                         {models.find(m => m.id === selectedModel)?.description || models.find(m => m.id === selectedModel)?.desc || '3.1 Flash Lite: Recommended default — ultra-fast latency and minimal token cost.'}
                     </div>
                 </div>
@@ -736,35 +713,21 @@ export default function Organizer() {
 
             {/* Sort by Date Added (Flat List) — Conditionally Active Flat Pipeline */}
             {status === 'idle' && (
-                <div style={{
-                    marginBottom: '2rem',
-                    padding: '1.25rem 1.5rem',
-                    background: flatDateSort
-                        ? 'linear-gradient(135deg, var(--surface-alt), var(--amber-soft))'
-                        : 'var(--surface-alt)',
-                    borderRadius: '12px',
-                    border: flatDateSort
-                        ? '2px solid var(--amber)'
-                        : '1.5px solid var(--amber-border)',
-                    boxShadow: flatDateSort
-                        ? '0 0 0 3px var(--amber-soft), 0 4px 20px var(--amber-glow)'
-                        : 'none',
-                    transition: 'all 0.25s ease'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                <div className={`flat-date-card section-block ${flatDateSort ? 'active' : ''}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
                             <div style={{
                                 width: '36px',
                                 height: '36px',
                                 borderRadius: '10px',
-                                background: flatDateSort ? 'var(--amber-gradient)' : 'var(--surface-solid)',
-                                color: flatDateSort ? '#ffffff' : 'var(--amber)',
-                                border: '1px solid var(--amber-border)',
+                                background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
+                                color: flatDateSort ? '#ffffff' : 'var(--accent)',
+                                border: '1px solid var(--border)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 flexShrink: 0,
-                                boxShadow: flatDateSort ? '0 2px 8px var(--amber-glow)' : 'none',
+                                boxShadow: flatDateSort ? '0 2px 8px var(--accent-glow)' : 'none',
                                 transition: 'all 0.2s ease',
                                 marginTop: '2px'
                             }}>
@@ -779,9 +742,9 @@ export default function Organizer() {
                                         fontSize: '0.68rem',
                                         padding: '0.15rem 0.5rem',
                                         borderRadius: '10px',
-                                        background: 'var(--amber-soft)',
-                                        border: '1px solid var(--amber-border)',
-                                        color: 'var(--amber)',
+                                        background: 'var(--accent-soft)',
+                                        border: '1px solid var(--border)',
+                                        color: 'var(--accent)',
                                         fontWeight: 700,
                                         letterSpacing: '0.4px',
                                         textTransform: 'uppercase'
@@ -803,14 +766,14 @@ export default function Organizer() {
                                 width: '46px',
                                 height: '26px',
                                 borderRadius: '13px',
-                                border: '1px solid var(--amber-border)',
-                                background: flatDateSort ? 'var(--amber)' : 'var(--surface-solid)',
+                                border: '1px solid var(--border)',
+                                background: flatDateSort ? 'var(--accent)' : 'var(--surface-solid)',
                                 position: 'relative',
                                 cursor: 'pointer',
                                 padding: 0,
                                 flexShrink: 0,
                                 transition: 'all 0.2s ease',
-                                boxShadow: flatDateSort ? '0 0 10px var(--amber-glow)' : 'none'
+                                boxShadow: flatDateSort ? '0 0 10px var(--accent-glow)' : 'none'
                             }}
                         >
                             <span style={{
@@ -828,8 +791,8 @@ export default function Organizer() {
                     </div>
 
                     {flatDateSort && (
-                        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--amber-border)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.4rem' }}>
                                 <label style={{ color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: '600' }}>
                                     Chronological Direction
                                 </label>
@@ -837,7 +800,7 @@ export default function Organizer() {
                                     {dateSortOrder === 'desc' ? 'Newest bookmarks at the top' : 'Oldest bookmarks at the top'}
                                 </span>
                             </div>
-                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.3rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--amber-border)' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.3rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
                                 <button
                                     type="button"
                                     onClick={() => handleDateSortOrderChange('desc')}
@@ -846,7 +809,7 @@ export default function Organizer() {
                                         padding: '0.5rem 0.75rem',
                                         borderRadius: '6px',
                                         border: 'none',
-                                        background: dateSortOrder === 'desc' ? 'var(--amber-gradient)' : 'transparent',
+                                        background: dateSortOrder === 'desc' ? 'var(--accent-gradient)' : 'transparent',
                                         color: dateSortOrder === 'desc' ? '#ffffff' : 'var(--text-secondary)',
                                         cursor: 'pointer',
                                         fontSize: '0.82rem',
@@ -856,7 +819,7 @@ export default function Organizer() {
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '0.4rem',
-                                        boxShadow: dateSortOrder === 'desc' ? '0 1px 8px var(--amber-glow)' : 'none'
+                                        boxShadow: dateSortOrder === 'desc' ? '0 1px 8px var(--accent-glow)' : 'none'
                                     }}
                                 >
                                     <ArrowDown size={14} />
@@ -870,7 +833,7 @@ export default function Organizer() {
                                         padding: '0.5rem 0.75rem',
                                         borderRadius: '6px',
                                         border: 'none',
-                                        background: dateSortOrder === 'asc' ? 'var(--amber-gradient)' : 'transparent',
+                                        background: dateSortOrder === 'asc' ? 'var(--accent-gradient)' : 'transparent',
                                         color: dateSortOrder === 'asc' ? '#ffffff' : 'var(--text-secondary)',
                                         cursor: 'pointer',
                                         fontSize: '0.82rem',
@@ -880,7 +843,7 @@ export default function Organizer() {
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '0.4rem',
-                                        boxShadow: dateSortOrder === 'asc' ? '0 1px 8px var(--amber-glow)' : 'none'
+                                        boxShadow: dateSortOrder === 'asc' ? '0 1px 8px var(--accent-glow)' : 'none'
                                     }}
                                 >
                                     <ArrowUp size={14} />
@@ -892,254 +855,250 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Subfolder Target Size */}
+            {/* Subfolder & Sorting Strategy Row (2-col grid on wide, stacked on compact) */}
             {status === 'idle' && !flatDateSort && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                    <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                        Subfolder Organization
-                    </label>
-                    <div style={{ display: 'flex', gap: '0.5rem', padding: '0.4rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                        {subfolderOptions.map((option) => (
-                            <button
-                                key={option.id}
-                                onClick={() => handleSubfolderTargetChange(option.id)}
-                                style={{
-                                    flex: 1,
-                                    padding: '0.6rem 0.8rem',
-                                    borderRadius: '6px',
-                                    border: 'none',
-                                    background: subfolderTarget === option.id ? 'var(--accent-gradient)' : 'transparent',
-                                    color: subfolderTarget === option.id ? 'var(--on-accent)' : 'var(--text-secondary)',
-                                    cursor: 'pointer',
-                                    fontSize: '0.85rem',
-                                    fontWeight: subfolderTarget === option.id ? '600' : '500',
-                                    transition: 'all 0.2s ease',
-                                    boxShadow: subfolderTarget === option.id ? '0 1px 10px var(--accent-glow)' : 'none'
-                                }}
-                            >
-                                {option.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-                        {subfolderOptions.find(opt => opt.id === subfolderTarget)?.description}
-                    </div>
-                </div>
-            )}
-
-            {/* Folder Content Sorting (Schema-Dependent Mode) */}
-            {status === 'idle' && !flatDateSort && (
-                <div style={{
-                    marginBottom: '2rem',
-                    padding: '1.5rem',
-                    background: 'var(--surface-alt)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border)'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <FolderTree size={18} style={{ color: 'var(--accent)' }} />
-                            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600' }}>
-                                Folder Content Sorting
-                            </label>
-                        </div>
-                        <span style={{
-                            fontSize: '0.72rem',
-                            padding: '0.15rem 0.5rem',
-                            borderRadius: '10px',
-                            background: 'var(--surface-solid)',
-                            border: '1px solid var(--border)',
-                            color: 'var(--accent)',
-                            fontWeight: 600
-                        }}>
-                            {SCHEMA_SORT_OPTIONS.find(opt => opt.id === schemaSortOrder)?.badge || 'Active'}
-                        </span>
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: '1.4' }}>
-                        Choose how bookmarks are ordered inside each AI-generated category folder:
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {SCHEMA_SORT_OPTIONS.map(option => {
-                            const isSelected = schemaSortOrder === option.id;
-                            const IconComponent = option.icon;
-                            return (
+                <div className="settings-grid-row section-block">
+                    {/* Subfolder Target Size */}
+                    <div className="card-panel">
+                        <label style={{ display: 'block', marginBottom: '0.75rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
+                            Subfolder Organization
+                        </label>
+                        <div style={{ display: 'flex', gap: '0.5rem', padding: '0.4rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            {subfolderOptions.map((option) => (
                                 <button
                                     key={option.id}
-                                    type="button"
-                                    onClick={() => handleSchemaSortChange(option.id)}
+                                    onClick={() => handleSubfolderTargetChange(option.id)}
                                     style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        padding: '0.75rem 1rem',
-                                        borderRadius: '8px',
-                                        border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
-                                        background: isSelected ? 'var(--surface-solid)' : 'transparent',
-                                        color: 'var(--text-primary)',
+                                        flex: 1,
+                                        padding: '0.6rem 0.8rem',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        background: subfolderTarget === option.id ? 'var(--accent-gradient)' : 'transparent',
+                                        color: subfolderTarget === option.id ? 'var(--on-accent)' : 'var(--text-secondary)',
                                         cursor: 'pointer',
-                                        textAlign: 'left',
+                                        fontSize: '0.85rem',
+                                        fontWeight: subfolderTarget === option.id ? '600' : '500',
                                         transition: 'all 0.2s ease',
-                                        boxShadow: isSelected ? '0 2px 10px var(--accent-glow)' : 'none'
+                                        boxShadow: subfolderTarget === option.id ? '0 1px 10px var(--accent-glow)' : 'none'
                                     }}
                                 >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                        <div style={{
-                                            width: '32px',
-                                            height: '32px',
-                                            borderRadius: '8px',
-                                            background: isSelected ? 'var(--accent-soft)' : 'var(--surface-solid)',
-                                            color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            border: '1px solid var(--border)'
-                                        }}>
-                                            <IconComponent size={16} />
-                                        </div>
-                                        <div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <span style={{ fontSize: '0.86rem', fontWeight: isSelected ? '600' : '500' }}>
-                                                    {option.label}
-                                                </span>
-                                            </div>
-                                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
-                                                {option.desc}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {isSelected && (
-                                        <div style={{
-                                            width: '20px',
-                                            height: '20px',
-                                            borderRadius: '50%',
-                                            background: 'var(--accent)',
-                                            color: 'var(--on-accent)',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                            marginLeft: '0.5rem'
-                                        }}>
-                                            <Check size={12} strokeWidth={3} />
-                                        </div>
-                                    )}
+                                    {option.label}
                                 </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
-            {/* Duplicate Removal Toggle */}
-            {status === 'idle' && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-                    <div>
-                        <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                            Remove Duplicate URLs
-                        </label>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                            Keep one copy of each URL in the organized result; original bookmarks are unchanged
+                            ))}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
+                            {subfolderOptions.find(opt => opt.id === subfolderTarget)?.description}
                         </div>
                     </div>
-                    <button
-                        role="switch"
-                        aria-label="Remove duplicate URLs"
-                        aria-checked={removeDuplicates}
-                        onClick={() => handleRemoveDuplicatesToggle(!removeDuplicates)}
-                        style={{
-                            width: '44px',
-                            height: '24px',
-                            borderRadius: '12px',
-                            border: '1px solid var(--border)',
-                            background: removeDuplicates ? 'var(--accent)' : 'var(--surface-solid)',
-                            position: 'relative',
-                            cursor: 'pointer',
-                            padding: 0,
-                            flexShrink: 0,
-                            transition: 'background 0.2s ease'
-                        }}
-                    >
-                        <span style={{
-                            position: 'absolute',
-                            top: '2px',
-                            left: removeDuplicates ? '22px' : '2px',
-                            width: '18px',
-                            height: '18px',
-                            borderRadius: '50%',
-                            background: removeDuplicates ? 'var(--on-accent)' : 'var(--text-muted)',
-                            transition: 'left 0.2s ease'
-                        }} />
-                    </button>
-                </div>
-            )}
 
-            {/* Clean Titles Toggle */}
-            {status === 'idle' && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-                    <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '600' }}>
-                                Clean Titles with AI
-                            </label>
+                    {/* Folder Content Sorting (Schema-Dependent Mode) */}
+                    <div className="card-panel">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <FolderTree size={18} style={{ color: 'var(--accent)' }} />
+                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600' }}>
+                                    Folder Content Sorting
+                                </label>
+                            </div>
                             <span style={{
-                                fontSize: '0.68rem',
-                                padding: '0.12rem 0.45rem',
+                                fontSize: '0.72rem',
+                                padding: '0.15rem 0.5rem',
                                 borderRadius: '10px',
-                                background: cleanTitles ? 'var(--accent-soft)' : 'var(--surface-solid)',
+                                background: 'var(--surface-solid)',
                                 border: '1px solid var(--border)',
-                                color: cleanTitles ? 'var(--accent)' : 'var(--text-muted)',
-                                fontWeight: 600,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.3px'
+                                color: 'var(--accent)',
+                                fontWeight: 600
                             }}>
-                                Consumes AI Tokens
+                                {SCHEMA_SORT_OPTIONS.find(opt => opt.id === schemaSortOrder)?.badge || 'Active'}
                             </span>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: '1.4' }}>
-                            {flatDateSort
-                                ? 'Uses AI to rewrite cryptic, truncated, or raw-URL titles into clean names while preserving chronological date order. Consumes AI tokens and requires an API key.'
-                                : 'Uses AI to rewrite messy, truncated, or raw-URL titles into human-readable names. Consumes AI tokens.'}
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: '1.4' }}>
+                            Choose how bookmarks are ordered inside each AI-generated category folder:
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {SCHEMA_SORT_OPTIONS.map(option => {
+                                const isSelected = schemaSortOrder === option.id;
+                                const IconComponent = option.icon;
+                                return (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        onClick={() => handleSchemaSortChange(option.id)}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            padding: '0.75rem 1rem',
+                                            borderRadius: '8px',
+                                            border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+                                            background: isSelected ? 'var(--surface-solid)' : 'transparent',
+                                            color: 'var(--text-primary)',
+                                            cursor: 'pointer',
+                                            textAlign: 'left',
+                                            transition: 'all 0.2s ease',
+                                            boxShadow: isSelected ? '0 2px 10px var(--accent-glow)' : 'none'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                            <div style={{
+                                                width: '32px',
+                                                height: '32px',
+                                                borderRadius: '8px',
+                                                background: isSelected ? 'var(--accent-soft)' : 'var(--surface-solid)',
+                                                color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                border: '1px solid var(--border)'
+                                            }}>
+                                                <IconComponent size={16} />
+                                            </div>
+                                            <div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <span style={{ fontSize: '0.86rem', fontWeight: isSelected ? '600' : '500' }}>
+                                                        {option.label}
+                                                    </span>
+                                                </div>
+                                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                                    {option.desc}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {isSelected && (
+                                            <div style={{
+                                                width: '20px',
+                                                height: '20px',
+                                                borderRadius: '50%',
+                                                background: 'var(--accent)',
+                                                color: 'var(--on-accent)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                marginLeft: '0.5rem'
+                                            }}>
+                                                <Check size={12} strokeWidth={3} />
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
-                    <button
-                        role="switch"
-                        aria-label="Clean Titles with AI"
-                        aria-checked={cleanTitles}
-                        onClick={() => handleCleanTitlesToggle(!cleanTitles)}
-                        style={{
-                            width: '44px',
-                            height: '24px',
-                            borderRadius: '12px',
-                            border: '1px solid var(--border)',
-                            background: cleanTitles ? 'var(--accent)' : 'var(--surface-solid)',
-                            position: 'relative',
-                            cursor: 'pointer',
-                            padding: 0,
-                            flexShrink: 0,
-                            transition: 'background 0.2s ease'
-                        }}
-                    >
-                        <span style={{
-                            position: 'absolute',
-                            top: '2px',
-                            left: cleanTitles ? '22px' : '2px',
-                            width: '18px',
-                            height: '18px',
-                            borderRadius: '50%',
-                            background: cleanTitles ? 'var(--on-accent)' : 'var(--text-muted)',
-                            transition: 'left 0.2s ease'
-                        }} />
-                    </button>
+                </div>
+            )}
+
+            {/* Toggles Row (2-col grid on wide, stacked on compact) */}
+            {status === 'idle' && (
+                <div className="settings-grid-row section-block">
+                    {/* Duplicate Removal Toggle */}
+                    <div className="card-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                        <div>
+                            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
+                                Remove Duplicate URLs
+                            </label>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                                Keep one copy of each URL in the organized result; original bookmarks are unchanged
+                            </div>
+                        </div>
+                        <button
+                            role="switch"
+                            aria-label="Remove duplicate URLs"
+                            aria-checked={removeDuplicates}
+                            onClick={() => handleRemoveDuplicatesToggle(!removeDuplicates)}
+                            style={{
+                                width: '44px',
+                                height: '24px',
+                                borderRadius: '12px',
+                                border: '1px solid var(--border)',
+                                background: removeDuplicates ? 'var(--accent)' : 'var(--surface-solid)',
+                                position: 'relative',
+                                cursor: 'pointer',
+                                padding: 0,
+                                flexShrink: 0,
+                                transition: 'background 0.2s ease'
+                            }}
+                        >
+                            <span style={{
+                                position: 'absolute',
+                                top: '2px',
+                                left: removeDuplicates ? '22px' : '2px',
+                                width: '18px',
+                                height: '18px',
+                                borderRadius: '50%',
+                                background: removeDuplicates ? 'var(--on-accent)' : 'var(--text-muted)',
+                                transition: 'left 0.2s ease'
+                            }} />
+                        </button>
+                    </div>
+
+                    {/* Clean Titles Toggle */}
+                    <div className="card-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '600' }}>
+                                    Clean Titles with AI
+                                </label>
+                                <span style={{
+                                    fontSize: '0.68rem',
+                                    padding: '0.12rem 0.45rem',
+                                    borderRadius: '10px',
+                                    background: cleanTitles ? 'var(--accent-soft)' : 'var(--surface-solid)',
+                                    border: '1px solid var(--border)',
+                                    color: cleanTitles ? 'var(--accent)' : 'var(--text-muted)',
+                                    fontWeight: 600,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.3px'
+                                }}>
+                                    Consumes AI Tokens
+                                </span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', lineHeight: '1.4' }}>
+                                {flatDateSort
+                                    ? 'Uses AI to rewrite cryptic, truncated, or raw-URL titles into clean names while preserving chronological date order. Consumes AI tokens and requires an API key.'
+                                    : 'Uses AI to rewrite messy, truncated, or raw-URL titles into human-readable names. Consumes AI tokens.'}
+                            </div>
+                        </div>
+                        <button
+                            role="switch"
+                            aria-label="Clean Titles with AI"
+                            aria-checked={cleanTitles}
+                            onClick={() => handleCleanTitlesToggle(!cleanTitles)}
+                            style={{
+                                width: '44px',
+                                height: '24px',
+                                borderRadius: '12px',
+                                border: '1px solid var(--border)',
+                                background: cleanTitles ? 'var(--accent)' : 'var(--surface-solid)',
+                                position: 'relative',
+                                cursor: 'pointer',
+                                padding: 0,
+                                flexShrink: 0,
+                                transition: 'background 0.2s ease'
+                            }}
+                        >
+                            <span style={{
+                                position: 'absolute',
+                                top: '2px',
+                                left: cleanTitles ? '22px' : '2px',
+                                width: '18px',
+                                height: '18px',
+                                borderRadius: '50%',
+                                background: cleanTitles ? 'var(--on-accent)' : 'var(--text-muted)',
+                                transition: 'left 0.2s ease'
+                            }} />
+                        </button>
+                    </div>
                 </div>
             )}
 
             {/* Category Editor */}
             {status === 'idle' && !flatDateSort && (
-                <div className="glass-panel" style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '12px' }}>
+                <div className="glass-panel categories-panel section-block">
                     {/* Header with Title, Count Badge, and Clear All / Reset Action */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                    <div className="categories-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <h3 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.05rem', fontWeight: 600 }}>
                                 Customize Categories
@@ -1352,17 +1311,7 @@ export default function Organizer() {
                 <div
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
-                    style={{
-                        border: '2px dashed var(--border)',
-                        borderRadius: '12px',
-                        padding: '1.5rem',
-                        marginBottom: '2rem',
-                        textAlign: 'center',
-                        background: uploadedFile ? 'var(--success-soft)' : 'transparent',
-                        borderColor: uploadedFile ? 'var(--success)' : 'var(--border)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s'
-                    }}
+                    className={`upload-dropzone section-block ${uploadedFile ? 'has-file' : ''}`}
                     onClick={() => fileInputRef.current.click()}
                 >
                     <input
@@ -1416,21 +1365,8 @@ export default function Organizer() {
 
             {/* Saved results from a previous run (persists across panel sessions) */}
             {status === 'idle' && lastOrganized && (
-                <div style={{
-                    marginBottom: '2rem',
-                    background: 'var(--surface-alt)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '8px',
-                    boxSizing: 'border-box',
-                    overflow: 'hidden'
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '1rem',
-                        padding: '0.75rem 1rem'
-                    }}>
+                <div className="last-run-banner section-block">
+                    <div className="last-run-header">
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Last run: {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
                             {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
@@ -1536,7 +1472,7 @@ export default function Organizer() {
             )}
 
             {/* Controls */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
+            <div className="action-button-container section-block" style={{ display: 'flex', justifyContent: 'center' }}>
                 {status === 'complete' ? (
                     <div style={{ textAlign: 'center', width: '100%' }}>
                         <div style={{ marginBottom: '0.75rem', color: 'var(--success)', fontSize: '1.2rem', fontWeight: 'bold' }}>
@@ -1811,17 +1747,7 @@ export default function Organizer() {
 
             {/* Logs / Terminal */}
             <div
-                className="glass-panel"
-                style={{
-                    background: 'var(--terminal-bg)',
-                    border: '1px solid var(--border)',
-                    height: '300px',
-                    overflowY: 'auto',
-                    padding: '1rem',
-                    fontFamily: 'monospace',
-                    fontSize: '0.9rem',
-                    color: 'var(--terminal-text)'
-                }}
+                className="glass-panel terminal-panel"
                 ref={logContainerRef}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', borderBottom: '1px solid var(--terminal-muted)', paddingBottom: '0.5rem', color: 'var(--text-muted)' }}>
