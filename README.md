@@ -2,8 +2,6 @@
 
 Turn years of messy, unsorted bookmarks into a clean, browsable folder structure in one click — powered by Google Gemini via OpenRouter. Runs entirely in your browser's side panel: no account, no server, no data collection.
 
-<img src="assets/feature_showcase.png" alt="AI Bookmark Organizer Features - Your Digital Knowledge Hub" width="100%">
-
 ## 🚀 Features
 
 - **One-Click Organization** — Reads your browser bookmarks and sorts hundreds of links into intuitive categories and subfolders automatically.
