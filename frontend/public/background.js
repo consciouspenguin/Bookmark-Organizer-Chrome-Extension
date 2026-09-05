@@ -1,13 +1,27 @@
-// Background service worker
-// Currently not heavily used as logic is in Popup, but ready for future expansion.
-console.log("AI Bookmark Organizer Background Service Worker Loaded.");
+// Background service worker for AI Bookmark Organizer
 
-chrome.runtime.onInstalled.addListener(() => {
-    console.log("Extension installed.");
-
-    // Set panel behavior to open on click
-    if (chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
+function setupSidePanel() {
+    if (typeof chrome !== 'undefined' && chrome.sidePanel && chrome.sidePanel.setPanelBehavior) {
         chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
-            .catch((error) => console.error(error));
+            .catch((error) => console.error('Error setting side panel behavior:', error));
     }
+}
+
+// 1. Run on extension install or update (recommended official entry point)
+chrome.runtime.onInstalled.addListener(() => {
+    console.log('AI Bookmark Organizer extension installed/updated.');
+    setupSidePanel();
 });
+
+// 2. Run on browser startup
+chrome.runtime.onStartup.addListener(() => {
+    setupSidePanel();
+});
+
+// 3. Initial execution on service worker startup
+try {
+    setupSidePanel();
+} catch (e) {
+    console.warn('Initial side panel setup deferred:', e);
+}
+

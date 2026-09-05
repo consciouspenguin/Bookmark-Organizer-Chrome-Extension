@@ -8,14 +8,14 @@ function App() {
 
   return (
     <div className="app-container">
-      <header style={{ marginBottom: '3rem' }}>
+      <header style={{ marginBottom: '1.5rem' }}>
         {/* Top bar: theme toggle + close, right-aligned */}
         <div style={{
           display: 'flex',
           justifyContent: 'flex-end',
           alignItems: 'center',
           gap: '0.5rem',
-          marginBottom: '1.75rem'
+          marginBottom: '1rem'
         }}>
           <ThemeToggle theme={theme} setTheme={setTheme} />
           <button
@@ -41,7 +41,7 @@ function App() {
         {/* Title block */}
         <div style={{ textAlign: 'center' }}>
           <h1 style={{
-            fontSize: '3rem',
+            fontSize: 'clamp(1.75rem, 5vw, 2.5rem)',
             fontWeight: '800',
             background: 'var(--accent-gradient)',
             WebkitBackgroundClip: 'text',
@@ -50,7 +50,7 @@ function App() {
           }}>
             AI Bookmark Organizer
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', marginTop: '0.5rem' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 'clamp(0.95rem, 2.5vw, 1.15rem)', marginTop: '0.4rem' }}>
             Transform your chaos into a curated library
           </p>
         </div>

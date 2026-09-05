@@ -77,27 +77,131 @@ export function removeDuplicateUrls(bookmarks) {
     });
 }
 
+// Normalizes both Chrome API dateAdded (milliseconds) and Netscape add_date (seconds) to milliseconds
+export function getBookmarkTimestamp(bookmark) {
+    if (!bookmark) return 0;
+    // Chrome API dateAdded is epoch milliseconds
+    if (typeof bookmark.dateAdded === 'number' && !isNaN(bookmark.dateAdded) && bookmark.dateAdded > 0) {
+        return bookmark.dateAdded;
+    }
+    if (typeof bookmark.dateAdded === 'string' && /^\d+$/.test(bookmark.dateAdded.trim())) {
+        const num = Number(bookmark.dateAdded.trim());
+        if (num > 0) {
+            return num < 1e11 ? num * 1000 : num;
+        }
+    }
+    // Netscape HTML add_date is epoch seconds
+    if (bookmark.add_date) {
+        const num = Number(bookmark.add_date);
+        if (!isNaN(num) && num > 0) {
+            return num < 1e11 ? num * 1000 : num;
+        }
+    }
+    return 0;
+}
+
+// Normalizes and extracts hostname/domain from bookmark URL
+export function getBookmarkDomain(bookmark) {
+    if (!bookmark || !bookmark.url) return '';
+    try {
+        const hostname = new URL(bookmark.url).hostname.toLowerCase();
+        return hostname.replace(/^www\./, '');
+    } catch {
+        return '';
+    }
+}
+
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true) {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false, flatDateSort = false, dateSortOrder = "desc", schemaSortOrder = undefined) {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
         this.model = model;
         this.subfolderTarget = subfolderTarget;
-        this.sortAlphabetically = sortAlphabetically;
         this.removeDuplicates = removeDuplicates;
+        this.cleanTitles = cleanTitles;
+        this.flatDateSort = flatDateSort;
+        this.dateSortOrder = dateSortOrder; // 'desc' (newest first) or 'asc' (oldest first)
+
+        // schemaSortOrder can be 'alpha', 'date-desc', 'date-asc', 'domain', 'alpha-desc', or 'none'
+        if (schemaSortOrder !== undefined) {
+            this.schemaSortOrder = schemaSortOrder;
+            this.sortAlphabetically = schemaSortOrder === 'alpha';
+        } else {
+            this.sortAlphabetically = sortAlphabetically;
+            this.schemaSortOrder = sortAlphabetically ? 'alpha' : 'none';
+        }
+
         this.batchSize = 50;
         this.isCancelled = false;
         this.stats = {
             total: 0,
             duplicatesRemoved: 0,
             deadLinksArchived: 0,
-            categoriesCount: 0
+            categoriesCount: 0,
+            categoryBreakdown: {},
+            isFlat: flatDateSort,
+            dateSortOrder,
+            schemaSortOrder: this.schemaSortOrder
         };
     }
 
     cancel() {
         this.isCancelled = true;
+    }
+
+    async classifyWithSubdivision(batchData, schema, label = '') {
+        if (this.isCancelled) return [];
+
+        try {
+            return await classifyBatch(
+                batchData,
+                this.apiKey,
+                schema,
+                this.model,
+                this.cleanTitles,
+                () => this.isCancelled,
+                ({ delayMs, isRateLimit }) => {
+                    const sec = Math.ceil(delayMs / 1000);
+                    this.onProgress({
+                        status: 'warning',
+                        message: isRateLimit
+                            ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${label}...`
+                            : `Network issue on batch ${label}. Retrying in ${sec}s...`
+                    });
+                }
+            );
+        } catch (err) {
+            if (this.isCancelled || err?.isCancelled) {
+                return [];
+            }
+
+            // Permanent errors (like 401 Unauthorized, 403 Forbidden, 404 Model Not Found)
+            // cannot be resolved by splitting the batch. Avoid pointless recursive subdivision.
+            const isPermanentApiError = [401, 403, 404].includes(err?.statusCode);
+
+            if (batchData.length > 5 && !isPermanentApiError) {
+                const mid = Math.ceil(batchData.length / 2);
+                this.onProgress({
+                    status: 'info',
+                    message: `Splitting batch ${label} (${batchData.length} items) into smaller chunks of ${mid} to ensure 100% classification...`
+                });
+                const left = await this.classifyWithSubdivision(batchData.slice(0, mid), schema, `${label}.1`);
+                const right = await this.classifyWithSubdivision(batchData.slice(mid), schema, `${label}.2`);
+                return [...left, ...right];
+            }
+
+            console.error(`Batch ${label} failed on second pass:`, err);
+            this.onProgress({
+                status: 'warning',
+                message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.`
+            });
+            return batchData.map(b => ({
+                ...b,
+                category: 'Other',
+                sub_category: 'General'
+            }));
+        }
     }
 
     calculateAdaptiveBatchSize(totalBookmarks) {
@@ -126,7 +230,13 @@ export class OrganizerService {
                 for (const node of nodes) {
                     if (node.url) {
                         if (node.url.startsWith('http')) {
-                            allLinks.push({ title: node.title, url: node.url, id: node.id });
+                            allLinks.push({
+                                title: node.title,
+                                url: node.url,
+                                id: node.id,
+                                dateAdded: node.dateAdded,
+                                add_date: node.dateAdded ? String(Math.floor(node.dateAdded / 1000)) : undefined
+                            });
                         }
                     }
                     if (node.children) {
@@ -157,21 +267,116 @@ export class OrganizerService {
             return null;
         }
 
-        // Fast link reachability check: isolate unreachable URLs so they bypass AI classification
-        this.onProgress({ status: 'info', message: 'Scanning link reachability...' });
-        const { activeLinks, deadLinks } = await filterReachableBookmarks(allLinks, this.onProgress, () => this.isCancelled);
+        if (this.flatDateSort) {
+            let processedLinks = allLinks;
 
-        if (this.isCancelled) {
-            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
-            return null;
-        }
+            if (this.cleanTitles && this.apiKey) {
+                this.onProgress({ status: 'info', message: 'Cleaning bookmark titles with AI...' });
+                const dummySchema = { categories: [{ name: 'Bookmarks', sub_categories: [] }] };
+                const batchSize = this.calculateAdaptiveBatchSize(processedLinks.length);
+                const batches = [];
+                for (let i = 0; i < processedLinks.length; i += batchSize) {
+                    batches.push({
+                        index: batches.length,
+                        batchData: processedLinks.slice(i, i + batchSize)
+                    });
+                }
 
-        if (deadLinks.length > 0) {
+                const cleanedBatches = new Array(batches.length);
+                for (let i = 0; i < batches.length; i++) {
+                    if (this.isCancelled) break;
+                    this.onProgress({
+                        status: 'processing',
+                        message: `Cleaning titles (batch ${i + 1}/${batches.length})...`,
+                        percent: Math.round((i / batches.length) * 100)
+                    });
+                    cleanedBatches[i] = await this.classifyWithSubdivision(batches[i].batchData, dummySchema, `${i + 1}`);
+                }
+                if (this.isCancelled) {
+                    this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                    return null;
+                }
+                processedLinks = cleanedBatches.flat().filter(Boolean);
+            }
+
+            // Ensure no categories/folders are attached
+            const finalResults = processedLinks.map(b => ({
+                ...b,
+                category: null,
+                sub_category: null
+            }));
+
+            // Chronological sort
+            const isDesc = this.dateSortOrder !== 'asc'; // default 'desc' (newest first)
             this.onProgress({
                 status: 'info',
-                message: `Isolated ${deadLinks.length} unreachable bookmark${deadLinks.length === 1 ? '' : 's'} under Archive → Broken Links.`
+                message: `Sorting ${finalResults.length} bookmarks chronologically (${isDesc ? 'Newest First' : 'Oldest First'})...`
             });
+
+            finalResults.sort((a, b) => {
+                const timeA = getBookmarkTimestamp(a);
+                const timeB = getBookmarkTimestamp(b);
+                if (timeA === timeB) {
+                    return (a.title || '').localeCompare(b.title || '');
+                }
+                return isDesc ? timeB - timeA : timeA - timeB;
+            });
+
+            finalResults.isFlat = true;
+
+            const timestamps = finalResults.map(getBookmarkTimestamp).filter(t => t > 0);
+            let dateSpan = null;
+            if (timestamps.length > 0) {
+                const minDate = new Date(Math.min(...timestamps)).toLocaleDateString();
+                const maxDate = new Date(Math.max(...timestamps)).toLocaleDateString();
+                dateSpan = `${minDate} – ${maxDate}`;
+                this.onProgress({ status: 'info', message: `Date range: ${dateSpan}` });
+            }
+
+            this.stats = {
+                total: finalResults.length,
+                duplicatesRemoved,
+                deadLinksArchived: 0,
+                categoriesCount: 0,
+                categoryBreakdown: {},
+                isFlat: true,
+                dateSortOrder: this.dateSortOrder,
+                dateSpan
+            };
+            finalResults.stats = this.stats;
+
+            if (fileBookmarks) {
+                this.onProgress({ status: 'info', message: 'Generating chronological file...' });
+                downloadBookmarks(finalResults);
+            } else {
+                this.onProgress({ status: 'info', message: `Saving ${finalResults.length} chronological bookmarks to browser...` });
+                const rootId = '2';
+                const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
+                const rootFolder = await findOrCreateFolder(rootId, folderTitle);
+
+                const WRITE_CHUNK_SIZE = 15;
+                for (let i = 0; i < finalResults.length; i += WRITE_CHUNK_SIZE) {
+                    if (this.isCancelled) break;
+                    const chunk = finalResults.slice(i, i + WRITE_CHUNK_SIZE);
+                    await Promise.all(chunk.map(b => createBookmark(rootFolder.id, b.title, b.url)));
+                }
+            }
+
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
+            }
+
+            this.onProgress({ status: 'done', message: 'Organization complete!' });
+            return finalResults;
         }
+
+        // Bypassing network reachability probe on arbitrary bookmark URLs in Chrome extension context:
+        // External websites returning HTTP 'Link: ... rel="modulepreload"' or 'rel="preload"' response headers
+        // cause the browser to attempt preloading scripts into the extension's index.html context,
+        // violating Manifest V3 Content Security Policy (script-src 'self'). All bookmarks are classified directly.
+        const activeLinks = allLinks;
+        const deadLinks = [];
 
         let classifiedActive = [];
 
@@ -190,10 +395,14 @@ export class OrganizerService {
                     this.categories,
                     this.model,
                     this.subfolderTarget,
-                    ({ attempt, maxRetries, delayMs, error }) => {
+                    () => this.isCancelled,
+                    ({ delayMs, isRateLimit, attempt }) => {
+                        const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
-                            status: 'retry',
-                            message: `Schema generation encounter: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run is still progressing in background...`
+                            status: 'warning',
+                            message: isRateLimit
+                                ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation...`
+                                : `Network issue during schema generation. Retrying in ${sec}s...`
                         });
                     }
                 );
@@ -207,11 +416,20 @@ export class OrganizerService {
                     });
                 }
             } catch (err) {
+                if (this.isCancelled || err?.isCancelled) {
+                    this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                    return null;
+                }
                 console.error('Schema generation failed, falling back to basic categories:', err);
                 this.onProgress({ status: 'warning', message: `Schema generation failed after retries: ${err.message}. Using default categories (no subfolders).` });
                 schema = {
                     categories: this.categories.map(c => ({ name: c, sub_categories: [] }))
                 };
+            }
+
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
             }
 
             const total = activeLinks.length;
@@ -250,13 +468,19 @@ export class OrganizerService {
                         this.apiKey,
                         schema,
                         this.model,
-                        ({ attempt, maxRetries, delayMs, error }) => {
+                        this.cleanTitles,
+                        () => this.isCancelled,
+                        ({ delayMs, isRateLimit, attempt }) => {
+                            const sec = Math.ceil(delayMs / 1000);
                             this.onProgress({
-                                status: 'retry',
-                                message: `Batch ${currentIdx + 1} request error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
+                                status: 'warning',
+                                message: isRateLimit
+                                    ? `Rate limit reached (429). Pausing for ${sec}s before retrying batch ${currentIdx + 1}...`
+                                    : `Network issue on batch ${currentIdx + 1}. Retrying in ${sec}s...`
                             });
                         }
                     );
+                    if (this.isCancelled) return;
 
                     // Accumulate results
                     results[index] = classified;
@@ -264,6 +488,7 @@ export class OrganizerService {
                     this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
 
                 } catch (err) {
+                    if (this.isCancelled || err?.isCancelled) return;
                     console.error(`Batch ${currentIdx + 1} failed:`, err);
                     failedBatches.push({ index, batchData, label: currentIdx + 1 });
                     this.onProgress({ status: 'warning', message: `Batch ${currentIdx + 1} failed (${err.message}) — will retry after the main pass. Continuing remaining batches in background...` });
@@ -280,30 +505,19 @@ export class OrganizerService {
             }
             await Promise.all(workers);
 
+            if (this.isCancelled) {
+                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                return null;
+            }
+
             // Second pass: retry failed batches one at a time, with no concurrent
             // traffic competing — transient network drops usually clear by now.
             for (const { index, batchData, label } of failedBatches) {
                 if (this.isCancelled) break;
 
                 this.onProgress({ status: 'processing', message: `Retrying batch ${label}/${batches.length}...` });
-                try {
-                    results[index] = await classifyBatch(
-                        batchData,
-                        this.apiKey,
-                        schema,
-                        this.model,
-                        ({ attempt, maxRetries, delayMs, error }) => {
-                            this.onProgress({
-                                status: 'retry',
-                                message: `Batch ${label} retry error: ${error}. Retrying (${attempt}/${maxRetries}) in ${Math.round(delayMs / 1000)}s — run still progressing in background...`
-                            });
-                        }
-                    );
-                } catch (err) {
-                    console.error(`Batch ${label} failed on second pass:`, err);
-                    results[index] = batchData.map(b => ({ title: b.title, url: b.url, category: 'Other', sub_category: 'General' }));
-                    this.onProgress({ status: 'warning', message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.` });
-                }
+                results[index] = await this.classifyWithSubdivision(batchData, schema, label);
+                if (this.isCancelled) break;
                 processed += batchData.length;
                 this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
             }
@@ -320,13 +534,67 @@ export class OrganizerService {
         const finalResults = [...classifiedActive, ...deadLinks];
 
         // Creation order determines display order in Chrome, so sorting the
-        // results here alphabetizes the folders and the bookmarks within them.
-        if (this.sortAlphabetically) {
-            finalResults.sort((a, b) =>
-                (a.category || '').localeCompare(b.category || '') ||
-                (a.sub_category || '').localeCompare(b.sub_category || '') ||
-                (a.title || '').localeCompare(b.title || '')
-            );
+        // results here controls the order of folders and bookmarks within them.
+        if (this.schemaSortOrder && this.schemaSortOrder !== 'none') {
+            const sortLabels = {
+                'alpha': 'Alphabetical (A–Z)',
+                'date-desc': 'Date Added (Newest First)',
+                'date-asc': 'Date Added (Oldest First)',
+                'domain': 'Website / Domain (A–Z)',
+                'alpha-desc': 'Reverse Alphabetical (Z–A)'
+            };
+            const sortLabel = sortLabels[this.schemaSortOrder] || this.schemaSortOrder;
+            this.onProgress({
+                status: 'info',
+                message: `Sorting folder contents (${sortLabel})...`
+            });
+
+            finalResults.sort((a, b) => {
+                // Keep categories and sub-categories grouped and alphabetized
+                const catDiff = (a.category || '').localeCompare(b.category || '');
+                if (catDiff !== 0) return catDiff;
+                const subDiff = (a.sub_category || '').localeCompare(b.sub_category || '');
+                if (subDiff !== 0) return subDiff;
+
+                // Sort bookmarks within each folder according to chosen schema
+                switch (this.schemaSortOrder) {
+                    case 'date-desc': {
+                        const timeA = getBookmarkTimestamp(a);
+                        const timeB = getBookmarkTimestamp(b);
+                        if (timeA !== timeB) {
+                            return timeB - timeA;
+                        }
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'date-asc': {
+                        const timeA = getBookmarkTimestamp(a);
+                        const timeB = getBookmarkTimestamp(b);
+                        if (timeA !== timeB) {
+                            return timeA - timeB;
+                        }
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'domain': {
+                        const domainA = getBookmarkDomain(a);
+                        const domainB = getBookmarkDomain(b);
+                        const domainDiff = domainA.localeCompare(domainB);
+                        if (domainDiff !== 0) return domainDiff;
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'alpha-desc': {
+                        return (b.title || '').localeCompare(a.title || '');
+                    }
+                    case 'alpha':
+                    default: {
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                }
+            });
+        }
+
+        if (this.isCancelled) {
+            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+            return null;
         }
 
         if (fileBookmarks) {
@@ -392,14 +660,31 @@ export class OrganizerService {
             return null;
         }
 
-        // Compute summary statistics
+        // Compute summary statistics and flat category breakdown
+        const categoryBreakdown = {};
+        for (const item of finalResults) {
+            const cat = item.category || 'Other';
+            categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
+        }
+
         this.stats = {
             total: finalResults.length,
             duplicatesRemoved,
             deadLinksArchived: deadLinks.length,
-            categoriesCount: new Set(finalResults.map(r => r.category)).size
+            categoriesCount: Object.keys(categoryBreakdown).length,
+            categoryBreakdown,
+            isFlat: false,
+            schemaSortOrder: this.schemaSortOrder
         };
         finalResults.stats = this.stats;
+
+        // Log flat category breakdown to terminal
+        this.onProgress({ status: 'info', message: 'Category breakdown:' });
+        Object.entries(categoryBreakdown)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .forEach(([category, count]) => {
+                this.onProgress({ status: 'info', message: `  • ${category}: ${count}` });
+            });
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;

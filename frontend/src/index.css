@@ -32,6 +32,13 @@
   --error: #e07a7a;
   --error-soft: rgba(224, 122, 122, 0.12);
 
+  --amber: #f59e0b;
+  --amber-hover: #fbbf24;
+  --amber-soft: rgba(245, 158, 11, 0.12);
+  --amber-border: rgba(245, 158, 11, 0.40);
+  --amber-gradient: linear-gradient(135deg, #d97706, #f59e0b);
+  --amber-glow: rgba(245, 158, 11, 0.25);
+
   --terminal-bg: #080b10;
   --terminal-text: #8fa2c4;
   --terminal-muted: #5b6678;
@@ -66,6 +73,13 @@
   --error: #c45656;
   --error-soft: rgba(196, 86, 86, 0.10);
 
+  --amber: #d97706;
+  --amber-hover: #b45309;
+  --amber-soft: rgba(217, 119, 6, 0.10);
+  --amber-border: rgba(217, 119, 6, 0.40);
+  --amber-gradient: linear-gradient(135deg, #b45309, #d97706);
+  --amber-glow: rgba(217, 119, 6, 0.18);
+
   /* Keep the terminal a dark slate panel even in light mode —
      reads like a code block on a light page. */
   --terminal-bg: #232c39;
@@ -98,9 +112,15 @@ body {
 #root {
   width: 100%;
   min-height: 100%;
-  padding: 2rem;
+  padding: 1.25rem 0.85rem;
   text-align: center;
   box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  #root {
+    padding: 2rem;
+  }
 }
 
 /* Minimalist panel — soft surface, subtle border, gentle blur */
