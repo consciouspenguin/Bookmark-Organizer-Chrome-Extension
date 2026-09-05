@@ -120,7 +120,7 @@ describe('reconcileSubcategories', () => {
         expect(new Set(subsIn(detailed, 'Tech'))).toContain('Rust Ecosystem')
     })
 
-    it('caps subcategories per category, folding the smallest overflow into General', () => {
+    it('caps subcategories per category, folding the overflow into its nearest kin', () => {
         const classified = []
         // 12 distinct viable subcategories, descending in size.
         for (let i = 0; i < 12; i++) {
@@ -130,12 +130,78 @@ describe('reconcileSubcategories', () => {
         const result = reconcileSubcategories(classified, schema, { subfolderTarget: '5-10' })
 
         const distinct = new Set(subsIn(result, 'Tech'))
-        // 10 kept for '5-10', plus the General sink holding the 2 that overflowed.
-        expect(distinct.size).toBe(11)
-        expect(distinct).toContain('General')
+        // 10 kept for '5-10'; the 2 that overflowed join a surviving sibling
+        // rather than being dumped in General.
+        expect(distinct.size).toBe(10)
+        expect(distinct).not.toContain('General')
         expect(distinct).toContain('Topic A')
         expect(distinct).not.toContain('Topic L')
         expect(result.summary.cappedFolded).toBe(2)
+    })
+
+    it('sends capped overflow to General only when it shares no token with a survivor', () => {
+        const classified = []
+        for (let i = 0; i < 10; i++) {
+            classified.push(...items('Tech', `Topic ${String.fromCharCode(65 + i)}`, 20 - i, { proposed: true }))
+        }
+        classified.push(...items('Tech', 'Knitting Patterns', 4, { proposed: true }))
+
+        const result = reconcileSubcategories(classified, schema, { subfolderTarget: '5-10' })
+
+        expect(subsIn(result, 'Tech').filter(s => s === 'General')).toHaveLength(4)
+        expect(result.summary.cappedFolded).toBe(1)
+    })
+
+    it('never dissolves a whole category when no subcategory clears the floor', () => {
+        // 5 categories x 3 subcategories x 2 bookmarks. Nothing reaches
+        // minCount (3), which used to empty `kept` and rename every group to
+        // General — the branch's own bug, one layer down.
+        const classified = []
+        const wideSchema = { categories: [] }
+        for (let c = 0; c < 5; c++) {
+            const category = `Category ${c}`
+            const subs = [0, 1, 2].map(s => `Topic ${c}${s}`)
+            wideSchema.categories.push({ name: category, sub_categories: subs })
+            subs.forEach(sub => classified.push(...items(category, sub, 2)))
+        }
+
+        const result = reconcileSubcategories(classified, wideSchema, { subfolderTarget: '5-10' })
+
+        expect(result.classified).toHaveLength(30)
+        expect(result.classified.filter(b => b.sub_category === 'General')).toHaveLength(0)
+        expect(new Set(result.classified.map(b => b.sub_category)).size).toBe(15)
+        expect(result.summary.orphansFolded).toBe(0)
+    })
+
+    it('still dissolves a category whose every subcategory holds a single bookmark', () => {
+        // The rescue floor is deliberately 2: a one-bookmark folder is the
+        // sprawl the schema prompt bans, so it stays folded.
+        const classified = [
+            ...items('Tech', 'Alpha', 1),
+            ...items('Tech', 'Bravo', 1),
+            ...items('Tech', 'Charlie', 1),
+            ...items('Tech', 'Delta', 1)
+        ]
+
+        const result = reconcileSubcategories(classified, schema, { subfolderTarget: '5-10' })
+
+        expect(subsIn(result, 'Tech')).toEqual(['General', 'General', 'General', 'General'])
+        expect(result.summary.orphansFolded).toBe(4)
+    })
+
+    it('does not engage the rescue when the normal survivor path already applies', () => {
+        const classified = [
+            ...items('Tech', 'Web Development', 5),
+            ...items('Tech', 'Data Science', 5),
+            ...items('Tech', 'Web Frameworks', 1, { proposed: true }),
+            ...items('Tech', 'Web Tooling', 1, { proposed: true }),
+            ...items('Tech', 'Data Pipelines', 1, { proposed: true })
+        ]
+
+        const result = reconcileSubcategories(classified, schema, { subfolderTarget: '5-10' })
+
+        expect(new Set(subsIn(result, 'Tech'))).toEqual(new Set(['Web Development', 'Data Science']))
+        expect(result.summary.orphansFolded).toBe(3)
     })
 
     it('leaves General bookmarks and exempt categories untouched', () => {

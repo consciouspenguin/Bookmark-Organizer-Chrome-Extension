@@ -49,6 +49,21 @@ function overlap(a, b) {
     return shared;
 }
 
+// The surviving group a dissolved folder's bookmarks belong closest to, or
+// null when it shares no token with any of them.
+function nearestSibling(group, kept) {
+    let best = null;
+    let bestScore = 0;
+    for (const candidate of kept) {
+        const score = overlap(group.tokens, candidate.tokens);
+        if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+        }
+    }
+    return best;
+}
+
 /**
  * Normalize, merge and bound the subcategories produced by classification.
  *
@@ -132,8 +147,26 @@ export function reconcileSubcategories(classified, schema, { subfolderTarget = '
         // A folder too small to be worth its own place in the sidebar is
         // dissolved. Survivors are chosen first so nothing folds into a folder
         // that is itself about to disappear.
-        const survivors = resolved.filter(g => g.count >= minCount);
-        const orphans = resolved.filter(g => g.count < minCount);
+        let survivors = resolved.filter(g => g.count >= minCount);
+        let orphans = resolved.filter(g => g.count < minCount);
+
+        // A category must never lose all of its structure — that outcome is the
+        // bug this module exists to prevent. When nothing clears the floor, keep
+        // the largest groups holding at least two bookmarks rather than
+        // dissolving the whole category into "General". A category whose every
+        // subcategory holds a single bookmark genuinely has no structure, so it
+        // still falls through.
+        if (survivors.length === 0) {
+            const rescued = resolved
+                .filter(g => g.count >= 2)
+                .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+                .slice(0, max);
+            if (rescued.length > 0) {
+                const rescuedSet = new Set(rescued);
+                survivors = rescued;
+                orphans = resolved.filter(g => !rescuedSet.has(g));
+            }
+        }
 
         // Rank survivors by size, then name, and enforce the per-category
         // ceiling for this granularity setting.
@@ -141,25 +174,23 @@ export function reconcileSubcategories(classified, schema, { subfolderTarget = '
         const kept = survivors.slice(0, max);
         const capped = survivors.slice(max);
 
+        // Overflow past the ceiling is still well-classified content, so it goes
+        // to its nearest surviving kin on the same terms as an orphan. Dumping
+        // it in "General" put more than half of a healthy category there at the
+        // '0-5' setting.
         for (const group of capped) {
             summary.cappedFolded++;
             if (group.isProposed) summary.proposedFolded++;
-            rename.set(group, SINK_SUBCATEGORY);
+
+            const best = nearestSibling(group, kept);
+            rename.set(group, best ? best.name : SINK_SUBCATEGORY);
         }
 
         for (const group of orphans) {
             summary.orphansFolded++;
             if (group.isProposed) summary.proposedFolded++;
 
-            let best = null;
-            let bestScore = 0;
-            for (const candidate of kept) {
-                const score = overlap(group.tokens, candidate.tokens);
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = candidate;
-                }
-            }
+            const best = nearestSibling(group, kept);
             rename.set(group, best ? best.name : SINK_SUBCATEGORY);
         }
 
