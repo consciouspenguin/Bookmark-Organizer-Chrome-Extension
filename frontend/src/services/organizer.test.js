@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan } from './organizer'
 import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId, isNetworkError, isRateLimitError, isRetryableError } from './ai'
 import * as bookmarksExport from './bookmarks_export'
@@ -1464,5 +1464,142 @@ describe('Schema Folder Content Sorting (schemaSortOrder)', () => {
         expect(service.stats.schemaSortOrder).toBe('alpha')
     })
 })
+
+describe('calculateDateSpan', () => {
+    it('returns null for empty, null, or undated bookmark collections', () => {
+        expect(calculateDateSpan(null)).toBeNull()
+        expect(calculateDateSpan([])).toBeNull()
+        expect(calculateDateSpan([{ title: 'No Date', url: 'https://example.com' }])).toBeNull()
+        expect(calculateDateSpan([{ title: 'Zero Date', url: 'https://example.com', add_date: '0' }])).toBeNull()
+    })
+
+    it('returns a single formatted date when all bookmarks share the same day', () => {
+        // 1609459200 = 2021-01-01T00:00:00.000Z
+        const singleDayBookmarks = [
+            { title: 'Morning', url: 'https://a.com', add_date: '1609459200' },
+            { title: 'Noon', url: 'https://b.com', add_date: '1609470000' }
+        ]
+        const expectedDate = new Date(1609459200000).toLocaleDateString()
+        expect(calculateDateSpan(singleDayBookmarks)).toBe(expectedDate)
+    })
+
+    it('returns formatted oldest to newest range matching the oldest and newest bookmarks', () => {
+        const bookmarks = [
+            { title: 'Middle', url: 'https://b.com', add_date: '1600000000' }, // 2020-09-13
+            { title: 'Oldest', url: 'https://a.com', add_date: '1500000000' }, // 2017-07-14
+            { title: 'Newest', url: 'https://c.com', add_date: '1700000000' }  // 2023-11-14
+        ]
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date(1700000000000).toLocaleDateString()
+        expect(calculateDateSpan(bookmarks)).toBe(`${oldestDate} – ${newestDate}`)
+    })
+
+    it('handles large collections without stack overflow', () => {
+        const largeList = Array.from({ length: 70000 }, (_, i) => ({
+            title: `Item ${i}`,
+            url: `https://example.com/${i}`,
+            add_date: `${1500000000 + i}`
+        }))
+        const span = calculateDateSpan(largeList)
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date((1500000000 + 69999) * 1000).toLocaleDateString()
+        expect(span).toBe(`${oldestDate} – ${newestDate}`)
+    })
+})
+
+describe('total date range in categorized mode and oldest first sorting', () => {
+    beforeEach(() => {
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+    })
+
+    it('computes total date range (dateSpan) across all categorized bookmarks and logs it', async () => {
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: [] }]
+        })
+        vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
+            { title: 'Oldest Link', url: 'https://old.com', add_date: '1500000000', category: 'Tech', sub_category: 'Code' },
+            { title: 'Newest Link', url: 'https://new.com', add_date: '1700000000', category: 'Tech', sub_category: 'Code' }
+        ])
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const bookmarks = [
+            { title: 'Oldest Link', url: 'https://old.com', add_date: '1500000000' },
+            { title: 'Newest Link', url: 'https://new.com', add_date: '1700000000' }
+        ]
+
+        const service = new OrganizerService('test-key', ['Tech'], onProgress)
+        const results = await service.start(bookmarks)
+
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date(1700000000000).toLocaleDateString()
+        const expectedSpan = `${oldestDate} – ${newestDate}`
+
+        expect(service.stats.dateSpan).toBe(expectedSpan)
+        expect(results.stats.dateSpan).toBe(expectedSpan)
+        expect(progressMessages.some(m => m.includes(`Total date range: ${expectedSpan}`))).toBe(true)
+    })
+
+    it('pushes undated bookmarks to the bottom in flat chronological ascending (oldest first) sort', async () => {
+        const bookmarks = [
+            { title: 'No Date Bookmark', url: 'https://nodate.com' },
+            { title: 'Newer Bookmark', url: 'https://newer.com', add_date: '1700000000' },
+            { title: 'Older Bookmark', url: 'https://older.com', add_date: '1500000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            true, // flatDateSort
+            'asc' // dateSortOrder (oldest first)
+        )
+
+        const results = await service.start(bookmarks)
+        // Older (1500000000) should be first, then Newer (1700000000), then No Date at bottom
+        expect(results.map(b => b.title)).toEqual(['Older Bookmark', 'Newer Bookmark', 'No Date Bookmark'])
+    })
+
+    it('pushes undated bookmarks to the bottom inside folders for date-asc schemaSortOrder', async () => {
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Tech', sub_categories: [] }]
+        })
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
+            return batch.map(b => ({ ...b, category: 'Tech', sub_category: 'General' }))
+        })
+
+        const bookmarks = [
+            { title: 'Undated Tech', url: 'https://tech.com/undated' },
+            { title: 'Newest Tech', url: 'https://tech.com/newest', add_date: '1700000000' },
+            { title: 'Oldest Tech', url: 'https://tech.com/oldest', add_date: '1500000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false,
+            true,
+            false,
+            false,
+            'desc',
+            'date-asc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Oldest Tech', 'Newest Tech', 'Undated Tech'])
+    })
+})
+
 
 

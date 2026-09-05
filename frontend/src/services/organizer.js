@@ -82,22 +82,59 @@ export function getBookmarkTimestamp(bookmark) {
     if (!bookmark) return 0;
     // Chrome API dateAdded is epoch milliseconds
     if (typeof bookmark.dateAdded === 'number' && !isNaN(bookmark.dateAdded) && bookmark.dateAdded > 0) {
-        return bookmark.dateAdded;
+        return bookmark.dateAdded < 1e11 ? bookmark.dateAdded * 1000 : bookmark.dateAdded;
     }
-    if (typeof bookmark.dateAdded === 'string' && /^\d+$/.test(bookmark.dateAdded.trim())) {
-        const num = Number(bookmark.dateAdded.trim());
-        if (num > 0) {
-            return num < 1e11 ? num * 1000 : num;
+    if (typeof bookmark.dateAdded === 'string') {
+        const trimmed = bookmark.dateAdded.trim();
+        if (/^\d+$/.test(trimmed)) {
+            const num = Number(trimmed);
+            return num > 0 ? (num < 1e11 ? num * 1000 : num) : 0;
         }
+        const parsed = Date.parse(trimmed);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
     }
     // Netscape HTML add_date is epoch seconds
     if (bookmark.add_date) {
-        const num = Number(bookmark.add_date);
-        if (!isNaN(num) && num > 0) {
-            return num < 1e11 ? num * 1000 : num;
+        if (typeof bookmark.add_date === 'number' && !isNaN(bookmark.add_date) && bookmark.add_date > 0) {
+            return bookmark.add_date < 1e11 ? bookmark.add_date * 1000 : bookmark.add_date;
+        }
+        if (typeof bookmark.add_date === 'string') {
+            const trimmed = bookmark.add_date.trim();
+            if (/^\d+$/.test(trimmed)) {
+                const num = Number(trimmed);
+                return num > 0 ? (num < 1e11 ? num * 1000 : num) : 0;
+            }
+            const parsed = Date.parse(trimmed);
+            if (!isNaN(parsed) && parsed > 0) return parsed;
         }
     }
     return 0;
+}
+
+/**
+ * Calculates the formatted date range (oldest date to newest date) from an array of bookmarks.
+ * Returns null if no valid timestamps exist.
+ * If oldest and newest dates are on the same day, returns the single date.
+ * Otherwise returns `${oldestDate} – ${newestDate}`.
+ */
+export function calculateDateSpan(bookmarks) {
+    if (!Array.isArray(bookmarks) || bookmarks.length === 0) return null;
+    let minTime = Infinity;
+    let maxTime = -Infinity;
+
+    for (let i = 0; i < bookmarks.length; i++) {
+        const t = getBookmarkTimestamp(bookmarks[i]);
+        if (t > 0) {
+            if (t < minTime) minTime = t;
+            if (t > maxTime) maxTime = t;
+        }
+    }
+
+    if (minTime === Infinity || maxTime === -Infinity) return null;
+
+    const minDate = new Date(minTime).toLocaleDateString();
+    const maxDate = new Date(maxTime).toLocaleDateString();
+    return minDate === maxDate ? minDate : `${minDate} – ${maxDate}`;
 }
 
 // Normalizes and extracts hostname/domain from bookmark URL
@@ -142,7 +179,8 @@ export class OrganizerService {
             categoryBreakdown: {},
             isFlat: flatDateSort,
             dateSortOrder,
-            schemaSortOrder: this.schemaSortOrder
+            schemaSortOrder: this.schemaSortOrder,
+            dateSpan: null
         };
     }
 
@@ -338,20 +376,22 @@ export class OrganizerService {
             finalResults.sort((a, b) => {
                 const timeA = getBookmarkTimestamp(a);
                 const timeB = getBookmarkTimestamp(b);
-                if (timeA === timeB) {
-                    return (a.title || '').localeCompare(b.title || '');
+                if (timeA > 0 && timeB > 0) {
+                    if (timeA !== timeB) {
+                        return isDesc ? timeB - timeA : timeA - timeB;
+                    }
+                } else if (timeA > 0) {
+                    return -1; // Valid timestamp comes before missing timestamp
+                } else if (timeB > 0) {
+                    return 1;  // Missing timestamp goes to bottom
                 }
-                return isDesc ? timeB - timeA : timeA - timeB;
+                return (a.title || '').localeCompare(b.title || '');
             });
 
             finalResults.isFlat = true;
 
-            const timestamps = finalResults.map(getBookmarkTimestamp).filter(t => t > 0);
-            let dateSpan = null;
-            if (timestamps.length > 0) {
-                const minDate = new Date(Math.min(...timestamps)).toLocaleDateString();
-                const maxDate = new Date(Math.max(...timestamps)).toLocaleDateString();
-                dateSpan = `${minDate} – ${maxDate}`;
+            const dateSpan = calculateDateSpan(finalResults);
+            if (dateSpan) {
                 this.onProgress({ status: 'info', message: `Date range: ${dateSpan}` });
             }
 
@@ -583,16 +623,24 @@ export class OrganizerService {
                     case 'date-desc': {
                         const timeA = getBookmarkTimestamp(a);
                         const timeB = getBookmarkTimestamp(b);
-                        if (timeA !== timeB) {
-                            return timeB - timeA;
+                        if (timeA > 0 && timeB > 0) {
+                            if (timeA !== timeB) return timeB - timeA;
+                        } else if (timeA > 0) {
+                            return -1;
+                        } else if (timeB > 0) {
+                            return 1;
                         }
                         return (a.title || '').localeCompare(b.title || '');
                     }
                     case 'date-asc': {
                         const timeA = getBookmarkTimestamp(a);
                         const timeB = getBookmarkTimestamp(b);
-                        if (timeA !== timeB) {
-                            return timeA - timeB;
+                        if (timeA > 0 && timeB > 0) {
+                            if (timeA !== timeB) return timeA - timeB;
+                        } else if (timeA > 0) {
+                            return -1;
+                        } else if (timeB > 0) {
+                            return 1;
                         }
                         return (a.title || '').localeCompare(b.title || '');
                     }
@@ -689,6 +737,11 @@ export class OrganizerService {
             categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
         }
 
+        const dateSpan = calculateDateSpan(finalResults);
+        if (dateSpan) {
+            this.onProgress({ status: 'info', message: `Total date range: ${dateSpan}` });
+        }
+
         this.stats = {
             total: finalResults.length,
             duplicatesRemoved,
@@ -696,7 +749,8 @@ export class OrganizerService {
             categoriesCount: Object.keys(categoryBreakdown).length,
             categoryBreakdown,
             isFlat: false,
-            schemaSortOrder: this.schemaSortOrder
+            schemaSortOrder: this.schemaSortOrder,
+            dateSpan
         };
         finalResults.stats = this.stats;
 
