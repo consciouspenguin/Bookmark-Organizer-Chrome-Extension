@@ -93,7 +93,7 @@ function summarizeApiError(response, errorText) {
 }
 
 // Determine if an error is retryable (transient) vs permanent
-function isRetryableError(error, statusCode) {
+export function isRetryableError(error, statusCode) {
     // Explicitly flagged (e.g. malformed/truncated model output): the request
     // succeeded but the response was unusable — a fresh attempt may differ.
     if (error?.retryable) return true;
@@ -103,12 +103,50 @@ function isRetryableError(error, statusCode) {
 
     if (!statusCode) {
         // Network/timeout errors are retryable
-        return message.includes('timeout') || message.includes('network') || message.includes('fetch');
+        return error?.name === 'AbortError' ||
+               error?.name === 'TimeoutError' ||
+               message.includes('timeout') ||
+               message.includes('network') ||
+               message.includes('fetch') ||
+               message.includes('connection') ||
+               message.includes('abort');
     }
 
     // Retryable HTTP status codes:
-    // 429 = Rate Limited, 500 = Server Error, 502 = Bad Gateway, 503 = Service Unavailable, 504 = Gateway Timeout
-    return [429, 500, 502, 503, 504].includes(statusCode);
+    // 408 = Request Timeout, 429 = Rate Limited, 500 = Server Error, 502 = Bad Gateway, 503 = Service Unavailable, 504 = Gateway Timeout
+    return [408, 429, 500, 502, 503, 504].includes(statusCode);
+}
+
+// Check if an error was caused by a network drop, timeout, or unreachable host
+export function isNetworkError(error) {
+    if (!error) return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    if (error.name === 'AbortError' || error.name === 'TimeoutError') return true;
+
+    const statusCode = error.statusCode;
+    if ([408, 502, 503, 504].includes(statusCode)) return true;
+
+    const msg = (error.message || '').toLowerCase();
+    return msg.includes('network') ||
+           msg.includes('timeout') ||
+           msg.includes('fetch') ||
+           msg.includes('connection') ||
+           msg.includes('econnrefused') ||
+           msg.includes('econnreset') ||
+           msg.includes('etimedout') ||
+           msg.includes('enotfound') ||
+           msg.includes('offline') ||
+           msg.includes('load failed') ||
+           msg.includes('abort');
+}
+
+// Check if an error was caused by rate limits / quota exhaustion
+export function isRateLimitError(error) {
+    if (!error) return false;
+    const statusCode = error.statusCode;
+    if (statusCode === 429) return true;
+    const msg = (error.message || '').toLowerCase();
+    return msg.includes('rate') || msg.includes('quota') || msg.includes('too many requests');
 }
 
 // Validate a completion response and extract its JSON payload. Throws errors
@@ -195,23 +233,61 @@ function parseGeminiResponse(data) {
 // shared withRetry wrapper can decide whether to back off and try again.
 const REQUEST_TIMEOUT_MS = 30000;
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, isCancelled = null) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error("request timeout")), REQUEST_TIMEOUT_MS);
+    let cancelTimer = null;
+
+    const timer = setTimeout(() => {
+        controller.abort(new Error("request timeout"));
+    }, REQUEST_TIMEOUT_MS);
+
+    if (typeof isCancelled === 'function') {
+        cancelTimer = setInterval(() => {
+            if (isCancelled()) {
+                const cancelErr = new Error('Operation cancelled.');
+                cancelErr.isCancelled = true;
+                controller.abort(cancelErr);
+            }
+        }, 150);
+    }
+
     try {
-        return await fetch(url, { ...options, signal: controller.signal });
+        const response = await fetch(url, { ...options, signal: controller.signal });
+
+        let bodyText = '';
+        let bodyJson = null;
+
+        if (!response.ok) {
+            if (typeof response.text === 'function') {
+                bodyText = await response.text();
+            } else if (typeof response.json === 'function') {
+                const j = await response.json();
+                bodyText = typeof j === 'string' ? j : JSON.stringify(j);
+            }
+            throw summarizeApiError(response, bodyText);
+        }
+
+        if (typeof response.json === 'function') {
+            bodyJson = await response.json();
+        } else if (typeof response.text === 'function') {
+            bodyText = await response.text();
+            bodyJson = JSON.parse(bodyText);
+        }
+
+        return bodyJson;
     } finally {
         clearTimeout(timer);
+        if (cancelTimer) clearInterval(cancelTimer);
     }
 }
 
 // Single model call routed to the right provider by key prefix. Returns the
 // parsed JSON object. Throws errors tagged with statusCode/retryable so the
 // shared withRetry wrapper can decide whether to back off and try again.
-async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens }) {
+async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens }, isCancelled = null) {
     if (detectProvider(apiKey) === 'gemini') {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModelId(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        const response = await fetchWithTimeout(url, {
+        const data = await fetchWithTimeout(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -223,16 +299,12 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
                     responseMimeType: "application/json"
                 }
             })
-        });
+        }, isCancelled);
 
-        if (!response.ok) {
-            throw summarizeApiError(response, await response.text());
-        }
-
-        return parseGeminiResponse(await response.json());
+        return parseGeminiResponse(data);
     }
 
-    const response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
+    const data = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: OR_HEADERS(apiKey),
         body: JSON.stringify({
@@ -245,18 +317,13 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
             ],
             response_format: { type: "json_object" }
         })
-    });
+    }, isCancelled);
 
-    if (!response.ok) {
-        throw summarizeApiError(response, await response.text());
-    }
-
-    return parseModelResponse(await response.json());
+    return parseModelResponse(data);
 }
 
 // Generic retry wrapper with exponential backoff, rate-limit cooldowns, jitter, Retry-After header support, and cancellation
 export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCancelled = null, onRetry = null) {
-    let lastError;
     let attempt = 1;
 
     const checkCancelled = () => {
@@ -274,14 +341,12 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
         try {
             return await fn();
         } catch (error) {
-            lastError = error;
-
             if (error?.isCancelled) {
                 throw error;
             }
 
             // Extract status code if available
-            const statusCode = error.statusCode || (error.message?.match(/(\d{3})/) ? parseInt(error.message.match(/(\d{3})/)[1], 10) : null);
+            const statusCode = error.statusCode || (error.message?.match(/\b([45]\d{2})\b/) ? parseInt(error.message.match(/\b([45]\d{2})\b/)[1], 10) : null);
             const msgLower = (error?.message || '').toLowerCase();
             const isRateLimit = statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota');
 
@@ -407,7 +472,7 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
     const systemContent = "You are an expert information architect and precise JSON generator. Output only valid JSON. Do not use Markdown blocks.";
 
     return await withRetry(
-        () => callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 }),
+        () => callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 }, isCancelled),
         5,
         1500,
         isCancelled,
@@ -446,7 +511,7 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
     const systemContent = "You are a precise classification engine and JSON generator. Output only valid JSON. Do not use Markdown blocks.";
 
     return await withRetry(async () => {
-        const parsed = await callModel(apiKey, model, systemContent, prompt, { temperature: 0.1, maxTokens: 8000 });
+        const parsed = await callModel(apiKey, model, systemContent, prompt, { temperature: 0.1, maxTokens: 8000 }, isCancelled);
 
         // Join the model's index-only answers back to the source bookmarks.
         // Titles and urls come from OUR data, never from model output unless

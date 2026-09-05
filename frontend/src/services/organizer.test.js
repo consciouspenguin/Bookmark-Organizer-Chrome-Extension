@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain } from './organizer'
 import * as ai from './ai'
-import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
+import { classifyBatch, generateSchema, withRetry, geminiModelId, isNetworkError, isRateLimitError, isRetryableError } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
 import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES, SCHEMA_SORT_OPTIONS } from '../components/Organizer'
@@ -457,6 +457,80 @@ describe('withRetry resilient retry and cancellation', () => {
     })
 })
 
+describe('isNetworkError, isRateLimitError, and isRetryableError helpers', () => {
+    it('accurately identifies network and timeout errors', () => {
+        expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true)
+        expect(isNetworkError(new Error('request timeout'))).toBe(true)
+        expect(isNetworkError(new Error('NetworkError when attempting to fetch resource'))).toBe(true)
+        expect(isNetworkError(new Error('connect ECONNRESET 127.0.0.1'))).toBe(true)
+        expect(isNetworkError(new Error('getaddrinfo ENOTFOUND api.google.com'))).toBe(true)
+
+        const abortError = new Error('The operation was aborted')
+        abortError.name = 'AbortError'
+        expect(isNetworkError(abortError)).toBe(true)
+
+        const timeoutError = new Error('Timeout')
+        timeoutError.name = 'TimeoutError'
+        expect(isNetworkError(timeoutError)).toBe(true)
+
+        const err502 = new Error('Bad Gateway')
+        err502.statusCode = 502
+        expect(isNetworkError(err502)).toBe(true)
+
+        const err504 = new Error('Gateway Timeout')
+        err504.statusCode = 504
+        expect(isNetworkError(err504)).toBe(true)
+
+        const err408 = new Error('Request Timeout')
+        err408.statusCode = 408
+        expect(isNetworkError(err408)).toBe(true)
+
+        // Non-network errors
+        expect(isNetworkError(new Error('model returned invalid JSON'))).toBe(false)
+        expect(isNetworkError(new Error('model response was cut off at the max_tokens limit'))).toBe(false)
+        const err401 = new Error('Unauthorized')
+        err401.statusCode = 401
+        expect(isNetworkError(err401)).toBe(false)
+    })
+
+    it('accurately identifies rate limit errors', () => {
+        const err429 = new Error('Too Many Requests')
+        err429.statusCode = 429
+        expect(isRateLimitError(err429)).toBe(true)
+
+        expect(isRateLimitError(new Error('Resource exhausted: quota exceeded'))).toBe(true)
+        expect(isRateLimitError(new Error('rate limited — too many requests'))).toBe(true)
+
+        expect(isRateLimitError(new Error('Internal Server Error'))).toBe(false)
+        expect(isRateLimitError(new Error('Bad Request'))).toBe(false)
+    })
+
+    it('accurately identifies retryable errors', () => {
+        const explicitRetryable = new Error('something failed')
+        explicitRetryable.retryable = true
+        expect(isRetryableError(explicitRetryable)).toBe(true)
+
+        expect(isRetryableError(new TypeError('Failed to fetch'))).toBe(true)
+        expect(isRetryableError(new Error('request timeout'))).toBe(true)
+
+        const abortErr = new Error('Aborted')
+        abortErr.name = 'AbortError'
+        expect(isRetryableError(abortErr)).toBe(true)
+
+        const err408 = new Error('Timeout')
+        err408.statusCode = 408
+        expect(isRetryableError(err408, 408)).toBe(true)
+
+        const err500 = new Error('Server Error')
+        err500.statusCode = 500
+        expect(isRetryableError(err500, 500)).toBe(true)
+
+        const err400 = new Error('Bad Request')
+        err400.statusCode = 400
+        expect(isRetryableError(err400, 400)).toBe(false)
+    })
+})
+
 describe('classifyBatch and generateSchema default model and cancellation forwarding', () => {
     const originalFetch = global.fetch
 
@@ -774,6 +848,94 @@ describe('OrganizerService resilient batch processing and sub-batch subdivision'
         expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
         expect(results).toHaveLength(20)
         expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+    })
+
+    it('does not recursively subdivide on network errors or request timeouts', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const networkError = new TypeError('Failed to fetch')
+
+        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(networkError)
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // It should NOT attempt to split 20 -> 10 -> 5 when network fails
+        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
+        expect(results).toHaveLength(20)
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+        const warningMsg = progressMessages.find(m => m.includes('Failed to fetch'))
+        expect(warningMsg).toBeDefined()
+    })
+
+    it('does not recursively subdivide on 429 rate-limit errors or 5xx server errors', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const rateLimitErr = new Error('Resource exhausted / quota exceeded')
+        rateLimitErr.statusCode = 429
+
+        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(rateLimitErr)
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // It should NOT attempt to split 20 -> 10 -> 5 on rate limits
+        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
+        expect(results).toHaveLength(20)
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+    })
+
+    it('aborts immediately and reports error when navigator.onLine is false for AI modes', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        const originalOnLine = navigator.onLine
+        Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+
+        try {
+            const progressEvents = []
+            const onProgress = (evt) => progressEvents.push(evt)
+
+            const service = new OrganizerService('test-key', ['Tech'], onProgress)
+            const bookmarks = [{ title: 'Site', url: 'https://example.com' }]
+            const result = await service.start(bookmarks)
+
+            expect(result).toBeNull()
+            expect(progressEvents).toContainEqual({
+                status: 'error',
+                message: 'No internet connection detected. Please check your network and try again.'
+            })
+        } finally {
+            Object.defineProperty(navigator, 'onLine', { value: originalOnLine, configurable: true })
+        }
     })
 
     it('computes categoryBreakdown in stats and logs flat category tally to onProgress', async () => {
