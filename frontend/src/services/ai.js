@@ -718,7 +718,7 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
 
 export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", cleanTitles = false, isCancelled = null, onRetry = null) {
     const titleInstruction = cleanTitles
-        ? `\n    6. Title cleanup: If clean_title is requested, provide a cleaned, human-readable title in the 'clean_title' field for each bookmark (strip site prefixes/suffixes like 'Login |', '- Wikipedia', query noise, or convert raw URL titles into clean titles). If the existing title is already clean, keep it as is.`
+        ? `\n    7. Title cleanup: If clean_title is requested, provide a cleaned, human-readable title in the 'clean_title' field for each bookmark (strip site prefixes/suffixes like 'Login |', '- Wikipedia', query noise, or convert raw URL titles into clean titles). If the existing title is already clean, keep it as is.`
         : '';
 
     const returnSchema = cleanTitles
@@ -726,17 +726,18 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
         : '{ "classified": [ { "i": 0, "category": "...", "sub_category": "..." } ] }';
 
     const prompt = `
-    Classify these ${bookmarks.length} bookmarks into the fixed folder structure below.
+    Classify these ${bookmarks.length} bookmarks into the folder structure below.
 
-    APPROVED SCHEMA (the ONLY categories and sub-categories you may use):
+    APPROVED SCHEMA:
     ${JSON.stringify(schema)}
 
     RULES
     1. For each bookmark, pick the single best-fitting category and sub_category, judging by the user's likely INTENT in saving it — not just keyword matching on the title.
-    2. You MUST use category and sub_category strings EXACTLY as written in the schema above (same spelling, casing, spacing). Do not paraphrase or invent variants.
-    3. If a bookmark fits a category but no sub-category within it, use "General" as the sub_category.
-    4. If a bookmark fits no category at all, classify it as category "Other" with sub_category "General".
-    5. Every bookmark must be classified exactly once. Refer to each bookmark ONLY by its index "i" — do NOT repeat titles or urls in your output.${titleInstruction}
+    2. CATEGORY is fixed: you MUST use a "category" string EXACTLY as written in the schema above (same spelling, casing, spacing). Never invent a new category.
+    3. SUB_CATEGORY: strongly prefer one written exactly as in the schema. The schema was designed from a sample, so it may miss a real theme. If at least 3 bookmarks in THIS batch share a clear, specific theme that no schema sub-category captures well, you MAY introduce ONE new sub_category for them under the correct existing category. Name it in Title Case, 1-3 words, and make sure it is not a synonym or near-duplicate of a sub-category already in the schema.
+    4. Use "General" as the sub_category ONLY when a bookmark genuinely belongs in the category but fits no sub-category at all — neither an existing one nor a new one worth creating. This should be rare.
+    5. If a bookmark fits no category at all, classify it as category "Other" with sub_category "General".
+    6. Every bookmark must be classified exactly once. Refer to each bookmark ONLY by its index "i" — do NOT repeat titles or urls in your output.${titleInstruction}
 
     Return JSON object: ${returnSchema}
 
@@ -760,14 +761,48 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
                 byIndex.set(entry.i, entry);
             }
         }
+
+        // Categories stay strictly schema-bound; only sub-categories may be
+        // proposed (rule 3). Look up the approved names once per batch.
+        const schemaCategories = new Map(
+            (Array.isArray(schema?.categories) ? schema.categories : [])
+                .filter(c => typeof c?.name === 'string')
+                .map(c => [
+                    c.name.trim().toLowerCase(),
+                    new Set((Array.isArray(c.sub_categories) ? c.sub_categories : [])
+                        .filter(s => typeof s === 'string')
+                        .map(s => s.trim().toLowerCase()))
+                ])
+        );
+
         return bookmarks.map((b, i) => {
             const entry = byIndex.get(i);
             const hasCleanTitle = cleanTitles && typeof entry?.clean_title === 'string' && entry.clean_title.trim().length > 0;
+
+            const rawCategory = typeof entry?.category === 'string' ? entry.category.trim() : '';
+            const rawSub = typeof entry?.sub_category === 'string' ? entry.sub_category.trim() : '';
+
+            // An invented category is rejected outright — the schema's top level
+            // is the user's own configured list, so a novel one is a mistake.
+            const knownSubs = schemaCategories.get(rawCategory.toLowerCase());
+            const category = knownSubs ? rawCategory : 'Other';
+            const sub_category = (knownSubs && rawSub) ? rawSub : 'General';
+
+            // A sub-category absent from the schema is the model exercising
+            // rule 3. Flag it so reconciliation can keep it only if enough
+            // bookmarks landed there across all batches.
+            const proposed = Boolean(
+                knownSubs &&
+                sub_category !== 'General' &&
+                !knownSubs.has(sub_category.toLowerCase())
+            );
+
             return {
                 ...b,
                 title: hasCleanTitle ? entry.clean_title.trim() : b.title,
-                category: entry?.category || 'Other',
-                sub_category: entry?.sub_category || 'General'
+                category,
+                sub_category,
+                ...(proposed ? { proposed: true } : {})
             };
         });
     }, 5, 1500, isCancelled, onRetry);

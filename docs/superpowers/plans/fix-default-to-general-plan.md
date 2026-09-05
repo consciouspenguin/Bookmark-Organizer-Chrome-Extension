@@ -1,8 +1,52 @@
 # Fix: Bookmarks Collapsing Into "General" — Subcategory Reliability, Hybrid Classification & Export Alignment
 
 **Branch**: `fix/default_to_general`
-**Status**: Planning
+**Status**: Implemented — all 9 tasks complete, 153 tests passing (baseline was 90)
 **Last Updated**: 2026-09-05
+
+## Implementation status
+
+| Task | Status | Landed in |
+|------|--------|-----------|
+| 1. Schema validation + corrective retry | Done | `services/ai.js` |
+| 2. Token budget + truncation salvage | Done | `services/ai.js` |
+| 3. Phase-1 prompt rework | Done | `services/ai.js` |
+| 4. Hybrid subcategory proposals | Done | `services/ai.js` |
+| 5. Reconciliation pass | Done | `services/reconcile.js`, `services/organizer.js` |
+| 6. Curated fallback schema | Done | `services/defaultSchema.js`, `services/organizer.js` |
+| 7. Export alignment | Done | `services/bookmarks_export.js`, deleted `utils/generator.js` |
+| 8. Observability | Done | `services/organizer.js` |
+| 9. Fixtures + regression tests | Done | `__fixtures__/finance-heavy-bookmarks.json` + 4 test files |
+
+### Deviations from the plan as written
+
+- **Task 2 salvage needed a real repair, not a wider slice.** `extractJson`
+  slices from the first `{` to the last `}`, which cannot parse a response with
+  unbalanced brackets. Added `salvagePartialJson()`, which walks the text
+  tracking string state and bracket depth, rewinds to the last completed value,
+  and closes the open brackets. It also has to *undo* a cut point set by a
+  closed **key** string, or the repair yields `{"name"}`.
+- **Task 6 leaves unknown custom categories with `[]`, not `["General"]`.**
+  Both produce the same output (the classifier falls back to `General`, which
+  Task 7 files at the category root), but seeding the schema with a name the
+  Phase-1 prompt explicitly bans is self-contradictory. The plan's real
+  invariant — never a schema where *every* category is empty — holds.
+- **Task 9 fixture is 137 bookmarks, not ~200.** Enough for 3 batches at the
+  adaptive batch size, which is what exercises the concurrency and
+  reconciliation paths. The first draft had 1–2 bookmark tail subcategories,
+  which reconciliation correctly folded into `General` (22% share); the fixture
+  was fattened so every subcategory carries ≥ 4, as a real collection would.
+- **Task 4 prompt efficacy is unverified.** Unit tests cover the parsing and
+  tagging against mocked responses; whether the model actually proposes good
+  subcategories needs a real API run (see *Remaining manual verification*).
+
+### Remaining manual verification
+
+Run the extension against a real Gemini key on a large collection and confirm:
+subcategories are topical rather than `General`; the `Subcategories: +X
+AI-created, ~Y merged, Z folded` log line reads sensibly; and the `General`
+share stays under 20%. Tune `minCount` / `max` in `reconcile.js` if proposals
+sprawl or over-fold.
 
 ## Executive Summary
 

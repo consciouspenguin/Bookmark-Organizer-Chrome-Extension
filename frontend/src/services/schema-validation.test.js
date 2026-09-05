@@ -296,6 +296,118 @@ describe('generateSchema validation and corrective retry', () => {
     })
 })
 
+describe('classifyBatch hybrid subcategory proposals', () => {
+    let originalFetch
+
+    const classifyResponse = (classified) =>
+        orResponse(JSON.stringify({ classified }))
+
+    const threeBookmarks = [
+        { title: 'A', url: 'https://a.example.com' },
+        { title: 'B', url: 'https://b.example.com' },
+        { title: 'C', url: 'https://c.example.com' }
+    ]
+
+    beforeEach(() => {
+        originalFetch = global.fetch
+    })
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.restoreAllMocks()
+    })
+
+    it('keeps a sub_category absent from the schema and flags it as proposed', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Tech & Development', sub_category: 'Web Development' },
+            { i: 1, category: 'Tech & Development', sub_category: 'Rust Ecosystem' },
+            { i: 2, category: 'Tech & Development', sub_category: 'Rust Ecosystem' }
+        ]))
+
+        const result = await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        expect(result[0].sub_category).toBe('Web Development')
+        expect(result[0].proposed).toBeUndefined()
+
+        expect(result[1].sub_category).toBe('Rust Ecosystem')
+        expect(result[1].proposed).toBe(true)
+        expect(result[2].proposed).toBe(true)
+    })
+
+    it('matches schema sub-categories case-insensitively rather than calling them proposed', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Tech & Development', sub_category: '  web development  ' },
+            { i: 1, category: 'tech & development', sub_category: 'Databases' },
+            { i: 2, category: 'Tech & Development', sub_category: 'Security' }
+        ]))
+
+        const result = await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        expect(result.every(r => r.proposed === undefined)).toBe(true)
+        expect(result[0].sub_category).toBe('web development')
+    })
+
+    it('coerces an invented category to Other/General', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Totally Made Up', sub_category: 'Something' },
+            { i: 1, category: 'Tech & Development', sub_category: 'Databases' },
+            { i: 2, category: 'Tech & Development', sub_category: 'Security' }
+        ]))
+
+        const result = await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        expect(result[0].category).toBe('Other')
+        expect(result[0].sub_category).toBe('General')
+        expect(result[0].proposed).toBeUndefined()
+    })
+
+    it('never marks General as proposed, and fills in missing entries', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Tech & Development', sub_category: 'General' }
+            // indexes 1 and 2 omitted entirely by the model
+        ]))
+
+        const result = await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        expect(result).toHaveLength(3)
+        expect(result[0]).toMatchObject({ category: 'Tech & Development', sub_category: 'General' })
+        expect(result[0].proposed).toBeUndefined()
+        expect(result[1]).toMatchObject({ category: 'Other', sub_category: 'General' })
+        expect(result[2]).toMatchObject({ category: 'Other', sub_category: 'General' })
+    })
+
+    it('preserves clean titles and source fields alongside a proposed subcategory', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Finance & Crypto', sub_category: 'Options Trading', clean_title: '  Barchart Options  ' }
+        ]))
+
+        const source = [{ title: 'Barchart Options Screener | barchart.com', url: 'https://barchart.com', icon: 'data:image/png;base64,AA', add_date: '1700000000' }]
+        const result = await classifyBatch(source, 'sk-or-test-key', healthySchema, undefined, true)
+
+        expect(result[0]).toMatchObject({
+            title: 'Barchart Options',
+            url: 'https://barchart.com',
+            icon: 'data:image/png;base64,AA',
+            add_date: '1700000000',
+            category: 'Finance & Crypto',
+            sub_category: 'Options Trading',
+            proposed: true
+        })
+    })
+
+    it('instructs the model that categories are fixed but sub-categories may be proposed', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([]))
+
+        await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).messages[1].content
+        expect(prompt).toContain('CATEGORY is fixed')
+        expect(prompt).toContain('Never invent a new category')
+        expect(prompt).toMatch(/at least 3 bookmarks in THIS batch share a clear, specific theme/)
+        expect(prompt).toMatch(/Use "General" as the sub_category ONLY when/)
+    })
+})
+
 describe('truncation handling differs between schema design and classification', () => {
     let originalFetch
 

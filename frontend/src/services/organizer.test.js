@@ -187,7 +187,7 @@ describe('classifyBatch cleanTitles option', () => {
         expect(result[2].sub_category).toBe('General')
 
         // Verify prompt contains title cleanup instructions and updated example return schema
-        expect(capturedBody.messages[1].content).toContain('6. Title cleanup: If clean_title is requested')
+        expect(capturedBody.messages[1].content).toContain('7. Title cleanup: If clean_title is requested')
         expect(capturedBody.messages[1].content).toContain('{ "classified": [ { "i": 0, "category": "...", "sub_category": "...", "clean_title": "..." } ] }')
     })
 })

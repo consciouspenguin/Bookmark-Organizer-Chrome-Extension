@@ -1,0 +1,961 @@
+[
+  {
+    "title": "Barchart Options Screener",
+    "url": "https://trading-markets.example.com/barchart-options-screener",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1546560000000
+  },
+  {
+    "title": "BlackBoxStocks Live Scanner",
+    "url": "https://trading-markets.example.com/blackboxstocks-live-scanner",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1546819200000
+  },
+  {
+    "title": "Ape Wisdom Trending Stocks",
+    "url": "https://trading-markets.example.com/ape-wisdom-trending-stocks",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1547078400000
+  },
+  {
+    "title": "BigCharts Market Summary",
+    "url": "https://trading-markets.example.com/bigcharts-market-summary",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1547337600000
+  },
+  {
+    "title": "Barchart Futures Market Quotes",
+    "url": "https://trading-markets.example.com/barchart-futures-market-quotes",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1547596800000
+  },
+  {
+    "title": "All Star Charts Market Analysis",
+    "url": "https://trading-markets.example.com/all-star-charts-market-analysis",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1547856000000
+  },
+  {
+    "title": "Adam H Grimes Trading Blog",
+    "url": "https://trading-markets.example.com/adam-h-grimes-trading-blog",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1548115200000
+  },
+  {
+    "title": "Bear Call Spread Strategy",
+    "url": "https://trading-markets.example.com/bear-call-spread-strategy",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1548374400000
+  },
+  {
+    "title": "Buying Power Reduction In Options",
+    "url": "https://trading-markets.example.com/buying-power-reduction-in-options",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1548633600000
+  },
+  {
+    "title": "Best Quant Algo Trading Software",
+    "url": "https://trading-markets.example.com/best-quant-algo-trading-software",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1548892800000
+  },
+  {
+    "title": "BacktestingMax Trading Software",
+    "url": "https://trading-markets.example.com/backtestingmax-trading-software",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1549152000000
+  },
+  {
+    "title": "Capitalise.ai Trading Automation",
+    "url": "https://trading-markets.example.com/capitalise-ai-trading-automation",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Trading & Markets",
+    "dateAdded": 1549411200000
+  },
+  {
+    "title": "Etherscan Block Explorer",
+    "url": "https://crypto-blockchain.example.com/etherscan-block-explorer",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1549670400000
+  },
+  {
+    "title": "DeFi Llama TVL Rankings",
+    "url": "https://crypto-blockchain.example.com/defi-llama-tvl-rankings",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1549929600000
+  },
+  {
+    "title": "Coin Metrics Network Data",
+    "url": "https://crypto-blockchain.example.com/coin-metrics-network-data",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1550188800000
+  },
+  {
+    "title": "Uniswap Analytics Dashboard",
+    "url": "https://crypto-blockchain.example.com/uniswap-analytics-dashboard",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1550448000000
+  },
+  {
+    "title": "Glassnode On Chain Signals",
+    "url": "https://crypto-blockchain.example.com/glassnode-on-chain-signals",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1550707200000
+  },
+  {
+    "title": "Dune Analytics Crypto Queries",
+    "url": "https://crypto-blockchain.example.com/dune-analytics-crypto-queries",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Crypto & Blockchain",
+    "dateAdded": 1550966400000
+  },
+  {
+    "title": "BlackRock Investment Management",
+    "url": "https://investing-wealth.example.com/blackrock-investment-management",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1551225600000
+  },
+  {
+    "title": "Alpha Architect Factor Research",
+    "url": "https://investing-wealth.example.com/alpha-architect-factor-research",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1551484800000
+  },
+  {
+    "title": "Best Investing Courses",
+    "url": "https://investing-wealth.example.com/best-investing-courses",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1551744000000
+  },
+  {
+    "title": "Books On Retirement And Investing",
+    "url": "https://investing-wealth.example.com/books-on-retirement-and-investing",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1552003200000
+  },
+  {
+    "title": "Bogleheads Portfolio Wiki",
+    "url": "https://investing-wealth.example.com/bogleheads-portfolio-wiki",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1552262400000
+  },
+  {
+    "title": "Morningstar Fund Screener",
+    "url": "https://investing-wealth.example.com/morningstar-fund-screener",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Investing & Wealth",
+    "dateAdded": 1552521600000
+  },
+  {
+    "title": "Benzinga Financial News",
+    "url": "https://market-news.example.com/benzinga-financial-news",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1552780800000
+  },
+  {
+    "title": "Benzinga Latest Articles",
+    "url": "https://market-news.example.com/benzinga-latest-articles",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1553040000000
+  },
+  {
+    "title": "Bloomberg Markets",
+    "url": "https://market-news.example.com/bloomberg-markets",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1553299200000
+  },
+  {
+    "title": "Bloomberg Businessweek",
+    "url": "https://market-news.example.com/bloomberg-businessweek",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1553558400000
+  },
+  {
+    "title": "Bloomberg Live TV",
+    "url": "https://market-news.example.com/bloomberg-live-tv",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1553817600000
+  },
+  {
+    "title": "Biztoc News Aggregator",
+    "url": "https://market-news.example.com/biztoc-news-aggregator",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1554076800000
+  },
+  {
+    "title": "Best Financial News Aggregators",
+    "url": "https://market-news.example.com/best-financial-news-aggregators",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1554336000000
+  },
+  {
+    "title": "AI Stock News",
+    "url": "https://market-news.example.com/ai-stock-news",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Market News",
+    "dateAdded": 1554595200000
+  },
+  {
+    "title": "Amazon SEC Filing",
+    "url": "https://filings-research.example.com/amazon-sec-filing",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1554854400000
+  },
+  {
+    "title": "Amazon SEC Filings",
+    "url": "https://filings-research.example.com/amazon-sec-filings",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1555113600000
+  },
+  {
+    "title": "Advanced Micro Devices Stock Analysis",
+    "url": "https://filings-research.example.com/advanced-micro-devices-stock-analysis",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1555372800000
+  },
+  {
+    "title": "AMD AI Inference Analysis",
+    "url": "https://filings-research.example.com/amd-ai-inference-analysis",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1555632000000
+  },
+  {
+    "title": "AMD Positive Signals",
+    "url": "https://filings-research.example.com/amd-positive-signals",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1555891200000
+  },
+  {
+    "title": "2024 CFA Search",
+    "url": "https://filings-research.example.com/2024-cfa-search",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1556150400000
+  },
+  {
+    "title": "Beginners Guide To Financial Statements",
+    "url": "https://filings-research.example.com/beginners-guide-to-financial-statements",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Filings & Research",
+    "dateAdded": 1556409600000
+  },
+  {
+    "title": "2024 Economic Calendar",
+    "url": "https://economic-data.example.com/2024-economic-calendar",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Economic Data",
+    "dateAdded": 1556668800000
+  },
+  {
+    "title": "BEA Economic Glossary",
+    "url": "https://economic-data.example.com/bea-economic-glossary",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Economic Data",
+    "dateAdded": 1556928000000
+  },
+  {
+    "title": "Capital Gains Tax Calculator",
+    "url": "https://economic-data.example.com/capital-gains-tax-calculator",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Economic Data",
+    "dateAdded": 1557187200000
+  },
+  {
+    "title": "FRED Economic Series",
+    "url": "https://economic-data.example.com/fred-economic-series",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Economic Data",
+    "dateAdded": 1557446400000
+  },
+  {
+    "title": "Trading Economics Indicators",
+    "url": "https://economic-data.example.com/trading-economics-indicators",
+    "expected_category": "Finance & Crypto",
+    "expected_sub_category": "Economic Data",
+    "dateAdded": 1557705600000
+  },
+  {
+    "title": "MDN Web Docs Reference",
+    "url": "https://web-development.example.com/mdn-web-docs-reference",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Web Development",
+    "dateAdded": 1557964800000
+  },
+  {
+    "title": "Can I Use Browser Support",
+    "url": "https://web-development.example.com/can-i-use-browser-support",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Web Development",
+    "dateAdded": 1558224000000
+  },
+  {
+    "title": "CSS Tricks Flexbox Guide",
+    "url": "https://web-development.example.com/css-tricks-flexbox-guide",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Web Development",
+    "dateAdded": 1558483200000
+  },
+  {
+    "title": "Vite Build Tool Docs",
+    "url": "https://web-development.example.com/vite-build-tool-docs",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Web Development",
+    "dateAdded": 1558742400000
+  },
+  {
+    "title": "React Documentation",
+    "url": "https://web-development.example.com/react-documentation",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Web Development",
+    "dateAdded": 1559001600000
+  },
+  {
+    "title": "AI Inference Market Search",
+    "url": "https://ai-machine-learnin.example.com/ai-inference-market-search",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1559260800000
+  },
+  {
+    "title": "AI Investment News Search",
+    "url": "https://ai-machine-learnin.example.com/ai-investment-news-search",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1559520000000
+  },
+  {
+    "title": "AI Trading Bots And Sentiment Analysis",
+    "url": "https://ai-machine-learnin.example.com/ai-trading-bots-and-sentiment-analysis",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1559779200000
+  },
+  {
+    "title": "Algorithmic Trading With Twitter Sentiment",
+    "url": "https://ai-machine-learnin.example.com/algorithmic-trading-with-twitter-sentiment",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1560038400000
+  },
+  {
+    "title": "Automated News Sentiment Trading Strategy",
+    "url": "https://ai-machine-learnin.example.com/automated-news-sentiment-trading-strategy",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1560297600000
+  },
+  {
+    "title": "Hugging Face Model Hub",
+    "url": "https://ai-machine-learnin.example.com/hugging-face-model-hub",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "AI & Machine Learning",
+    "dateAdded": 1560556800000
+  },
+  {
+    "title": "GitHub Repository Search",
+    "url": "https://developer-tools.example.com/github-repository-search",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Developer Tools",
+    "dateAdded": 1560816000000
+  },
+  {
+    "title": "Regex101 Pattern Tester",
+    "url": "https://developer-tools.example.com/regex101-pattern-tester",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Developer Tools",
+    "dateAdded": 1561075200000
+  },
+  {
+    "title": "JSON Formatter Online",
+    "url": "https://developer-tools.example.com/json-formatter-online",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Developer Tools",
+    "dateAdded": 1561334400000
+  },
+  {
+    "title": "Postman API Client",
+    "url": "https://developer-tools.example.com/postman-api-client",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Developer Tools",
+    "dateAdded": 1561593600000
+  },
+  {
+    "title": "Cron Expression Builder",
+    "url": "https://developer-tools.example.com/cron-expression-builder",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "Developer Tools",
+    "dateAdded": 1561852800000
+  },
+  {
+    "title": "Docker Compose Reference",
+    "url": "https://devops-cloud.example.com/docker-compose-reference",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "DevOps & Cloud",
+    "dateAdded": 1562112000000
+  },
+  {
+    "title": "Terraform Registry Modules",
+    "url": "https://devops-cloud.example.com/terraform-registry-modules",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "DevOps & Cloud",
+    "dateAdded": 1562371200000
+  },
+  {
+    "title": "AWS Well Architected Framework",
+    "url": "https://devops-cloud.example.com/aws-well-architected-framework",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "DevOps & Cloud",
+    "dateAdded": 1562630400000
+  },
+  {
+    "title": "Kubernetes Patterns Guide",
+    "url": "https://devops-cloud.example.com/kubernetes-patterns-guide",
+    "expected_category": "Tech & Development",
+    "expected_sub_category": "DevOps & Cloud",
+    "dateAdded": 1562889600000
+  },
+  {
+    "title": "100 Great Websites For Bankers And Finance Professionals",
+    "url": "https://long-reads.example.com/100-great-websites-for-bankers-and-finance-professionals",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Long Reads",
+    "dateAdded": 1563148800000
+  },
+  {
+    "title": "Longform Essay Archive",
+    "url": "https://long-reads.example.com/longform-essay-archive",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Long Reads",
+    "dateAdded": 1563408000000
+  },
+  {
+    "title": "Aeon Ideas Essays",
+    "url": "https://long-reads.example.com/aeon-ideas-essays",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Long Reads",
+    "dateAdded": 1563667200000
+  },
+  {
+    "title": "The Marginalian Archive",
+    "url": "https://long-reads.example.com/the-marginalian-archive",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Long Reads",
+    "dateAdded": 1563926400000
+  },
+  {
+    "title": "Wikipedia Portal",
+    "url": "https://reference-wikis.example.com/wikipedia-portal",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Reference & Wikis",
+    "dateAdded": 1564185600000
+  },
+  {
+    "title": "Investopedia Terms Index",
+    "url": "https://reference-wikis.example.com/investopedia-terms-index",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Reference & Wikis",
+    "dateAdded": 1564444800000
+  },
+  {
+    "title": "40 Stock Market Terms For Beginners",
+    "url": "https://reference-wikis.example.com/40-stock-market-terms-for-beginners",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Reference & Wikis",
+    "dateAdded": 1564704000000
+  },
+  {
+    "title": "70 Stock Market Terms For Beginners",
+    "url": "https://reference-wikis.example.com/70-stock-market-terms-for-beginners",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Reference & Wikis",
+    "dateAdded": 1564963200000
+  },
+  {
+    "title": "arXiv Quantitative Finance",
+    "url": "https://science-research.example.com/arxiv-quantitative-finance",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Science & Research",
+    "dateAdded": 1565222400000
+  },
+  {
+    "title": "SSRN Working Papers",
+    "url": "https://science-research.example.com/ssrn-working-papers",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Science & Research",
+    "dateAdded": 1565481600000
+  },
+  {
+    "title": "Nature Research Highlights",
+    "url": "https://science-research.example.com/nature-research-highlights",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Science & Research",
+    "dateAdded": 1565740800000
+  },
+  {
+    "title": "Semantic Scholar Search",
+    "url": "https://science-research.example.com/semantic-scholar-search",
+    "expected_category": "Reading & Knowledge",
+    "expected_sub_category": "Science & Research",
+    "dateAdded": 1566000000000
+  },
+  {
+    "title": "Buy Side Quant Researcher AMA",
+    "url": "https://job-search.example.com/buy-side-quant-researcher-ama",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Job Search",
+    "dateAdded": 1566259200000
+  },
+  {
+    "title": "Levels.fyi Compensation Data",
+    "url": "https://job-search.example.com/levels-fyi-compensation-data",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Job Search",
+    "dateAdded": 1566518400000
+  },
+  {
+    "title": "Quant Job Board",
+    "url": "https://job-search.example.com/quant-job-board",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Job Search",
+    "dateAdded": 1566777600000
+  },
+  {
+    "title": "Remote Engineering Roles",
+    "url": "https://job-search.example.com/remote-engineering-roles",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Job Search",
+    "dateAdded": 1567036800000
+  },
+  {
+    "title": "Hedge Fund Careers Page",
+    "url": "https://job-search.example.com/hedge-fund-careers-page",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Job Search",
+    "dateAdded": 1567296000000
+  },
+  {
+    "title": "LinkedIn Feed",
+    "url": "https://professional-netwo.example.com/linkedin-feed",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Professional Network",
+    "dateAdded": 1567555200000
+  },
+  {
+    "title": "Industry Slack Directory",
+    "url": "https://professional-netwo.example.com/industry-slack-directory",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Professional Network",
+    "dateAdded": 1567814400000
+  },
+  {
+    "title": "Alumni Mentor Network",
+    "url": "https://professional-netwo.example.com/alumni-mentor-network",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Professional Network",
+    "dateAdded": 1568073600000
+  },
+  {
+    "title": "Conference Speaker List",
+    "url": "https://professional-netwo.example.com/conference-speaker-list",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Professional Network",
+    "dateAdded": 1568332800000
+  },
+  {
+    "title": "Negotiation Playbook",
+    "url": "https://workplace-skills.example.com/negotiation-playbook",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Workplace Skills",
+    "dateAdded": 1568592000000
+  },
+  {
+    "title": "Technical Writing Guide",
+    "url": "https://workplace-skills.example.com/technical-writing-guide",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Workplace Skills",
+    "dateAdded": 1568851200000
+  },
+  {
+    "title": "Running Effective Meetings",
+    "url": "https://workplace-skills.example.com/running-effective-meetings",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Workplace Skills",
+    "dateAdded": 1569110400000
+  },
+  {
+    "title": "Giving Feedback Well",
+    "url": "https://workplace-skills.example.com/giving-feedback-well",
+    "expected_category": "Work & Career",
+    "expected_sub_category": "Workplace Skills",
+    "dateAdded": 1569369600000
+  },
+  {
+    "title": "Dribbble Shots",
+    "url": "https://design-inspiration.example.com/dribbble-shots",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Design Inspiration",
+    "dateAdded": 1569628800000
+  },
+  {
+    "title": "Awwwards Site Of The Day",
+    "url": "https://design-inspiration.example.com/awwwards-site-of-the-day",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Design Inspiration",
+    "dateAdded": 1569888000000
+  },
+  {
+    "title": "Behance Curated Galleries",
+    "url": "https://design-inspiration.example.com/behance-curated-galleries",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Design Inspiration",
+    "dateAdded": 1570147200000
+  },
+  {
+    "title": "Land Book Landing Pages",
+    "url": "https://design-inspiration.example.com/land-book-landing-pages",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Design Inspiration",
+    "dateAdded": 1570406400000
+  },
+  {
+    "title": "Unsplash Free Photos",
+    "url": "https://stock-assets.example.com/unsplash-free-photos",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Stock Assets",
+    "dateAdded": 1570665600000
+  },
+  {
+    "title": "Google Fonts Library",
+    "url": "https://stock-assets.example.com/google-fonts-library",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Stock Assets",
+    "dateAdded": 1570924800000
+  },
+  {
+    "title": "Pexels Stock Video",
+    "url": "https://stock-assets.example.com/pexels-stock-video",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Stock Assets",
+    "dateAdded": 1571184000000
+  },
+  {
+    "title": "Noun Project Icons",
+    "url": "https://stock-assets.example.com/noun-project-icons",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Stock Assets",
+    "dateAdded": 1571443200000
+  },
+  {
+    "title": "DaVinci Resolve Tutorials",
+    "url": "https://video-photography.example.com/davinci-resolve-tutorials",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Video & Photography",
+    "dateAdded": 1571702400000
+  },
+  {
+    "title": "Premiere Pro Shortcuts",
+    "url": "https://video-photography.example.com/premiere-pro-shortcuts",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Video & Photography",
+    "dateAdded": 1571961600000
+  },
+  {
+    "title": "Lightroom Preset Packs",
+    "url": "https://video-photography.example.com/lightroom-preset-packs",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Video & Photography",
+    "dateAdded": 1572220800000
+  },
+  {
+    "title": "Color Grading Basics",
+    "url": "https://video-photography.example.com/color-grading-basics",
+    "expected_category": "Design & Media",
+    "expected_sub_category": "Video & Photography",
+    "dateAdded": 1572480000000
+  },
+  {
+    "title": "Netflix Browse",
+    "url": "https://streaming-video.example.com/netflix-browse",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Streaming & Video",
+    "dateAdded": 1572739200000
+  },
+  {
+    "title": "YouTube Subscriptions",
+    "url": "https://streaming-video.example.com/youtube-subscriptions",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Streaming & Video",
+    "dateAdded": 1572998400000
+  },
+  {
+    "title": "Criterion Channel Lineup",
+    "url": "https://streaming-video.example.com/criterion-channel-lineup",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Streaming & Video",
+    "dateAdded": 1573257600000
+  },
+  {
+    "title": "Plex Media Server",
+    "url": "https://streaming-video.example.com/plex-media-server",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Streaming & Video",
+    "dateAdded": 1573516800000
+  },
+  {
+    "title": "Reddit r/investing",
+    "url": "https://forums-communities.example.com/reddit-r-investing",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Forums & Communities",
+    "dateAdded": 1573776000000
+  },
+  {
+    "title": "Hacker News Front Page",
+    "url": "https://forums-communities.example.com/hacker-news-front-page",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Forums & Communities",
+    "dateAdded": 1574035200000
+  },
+  {
+    "title": "Lobsters Link Aggregator",
+    "url": "https://forums-communities.example.com/lobsters-link-aggregator",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Forums & Communities",
+    "dateAdded": 1574294400000
+  },
+  {
+    "title": "Stack Exchange Network",
+    "url": "https://forums-communities.example.com/stack-exchange-network",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Forums & Communities",
+    "dateAdded": 1574553600000
+  },
+  {
+    "title": "ESPN Scoreboard",
+    "url": "https://sports.example.com/espn-scoreboard",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Sports",
+    "dateAdded": 1574812800000
+  },
+  {
+    "title": "Basketball Reference Stats",
+    "url": "https://sports.example.com/basketball-reference-stats",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Sports",
+    "dateAdded": 1575072000000
+  },
+  {
+    "title": "Football Outsiders Analytics",
+    "url": "https://sports.example.com/football-outsiders-analytics",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Sports",
+    "dateAdded": 1575331200000
+  },
+  {
+    "title": "Formula One Race Calendar",
+    "url": "https://sports.example.com/formula-one-race-calendar",
+    "expected_category": "Entertainment & Social",
+    "expected_sub_category": "Sports",
+    "dateAdded": 1575590400000
+  },
+  {
+    "title": "Wolfram Alpha Compute",
+    "url": "https://web-utilities.example.com/wolfram-alpha-compute",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Web Utilities",
+    "dateAdded": 1575849600000
+  },
+  {
+    "title": "Time Zone Converter",
+    "url": "https://web-utilities.example.com/time-zone-converter",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Web Utilities",
+    "dateAdded": 1576108800000
+  },
+  {
+    "title": "Unit Conversion Table",
+    "url": "https://web-utilities.example.com/unit-conversion-table",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Web Utilities",
+    "dateAdded": 1576368000000
+  },
+  {
+    "title": "PDF Merge Tool",
+    "url": "https://web-utilities.example.com/pdf-merge-tool",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Web Utilities",
+    "dateAdded": 1576627200000
+  },
+  {
+    "title": "Slickdeals Front Page",
+    "url": "https://deals-coupons.example.com/slickdeals-front-page",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Deals & Coupons",
+    "dateAdded": 1576886400000
+  },
+  {
+    "title": "Camel Price History",
+    "url": "https://deals-coupons.example.com/camel-price-history",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Deals & Coupons",
+    "dateAdded": 1577145600000
+  },
+  {
+    "title": "Honey Coupon Finder",
+    "url": "https://deals-coupons.example.com/honey-coupon-finder",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Deals & Coupons",
+    "dateAdded": 1577404800000
+  },
+  {
+    "title": "Retailer Outlet Sales",
+    "url": "https://deals-coupons.example.com/retailer-outlet-sales",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Deals & Coupons",
+    "dateAdded": 1577664000000
+  },
+  {
+    "title": "Amazon Order History",
+    "url": "https://online-stores.example.com/amazon-order-history",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Online Stores",
+    "dateAdded": 1577923200000
+  },
+  {
+    "title": "Etsy Handmade Shop",
+    "url": "https://online-stores.example.com/etsy-handmade-shop",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Online Stores",
+    "dateAdded": 1578182400000
+  },
+  {
+    "title": "B&H Photo Store",
+    "url": "https://online-stores.example.com/b-h-photo-store",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Online Stores",
+    "dateAdded": 1578441600000
+  },
+  {
+    "title": "Newegg Components",
+    "url": "https://online-stores.example.com/newegg-components",
+    "expected_category": "Shopping & Tools",
+    "expected_sub_category": "Online Stores",
+    "dateAdded": 1578700800000
+  },
+  {
+    "title": "Google Flights Search",
+    "url": "https://flights-hotels.example.com/google-flights-search",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Flights & Hotels",
+    "dateAdded": 1578960000000
+  },
+  {
+    "title": "Seat Guru Aircraft Maps",
+    "url": "https://flights-hotels.example.com/seat-guru-aircraft-maps",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Flights & Hotels",
+    "dateAdded": 1579219200000
+  },
+  {
+    "title": "Skyscanner Fare Alerts",
+    "url": "https://flights-hotels.example.com/skyscanner-fare-alerts",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Flights & Hotels",
+    "dateAdded": 1579478400000
+  },
+  {
+    "title": "Hotel Points Calculator",
+    "url": "https://flights-hotels.example.com/hotel-points-calculator",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Flights & Hotels",
+    "dateAdded": 1579737600000
+  },
+  {
+    "title": "Atlas Obscura Places",
+    "url": "https://destination-guides.example.com/atlas-obscura-places",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Destination Guides",
+    "dateAdded": 1579996800000
+  },
+  {
+    "title": "Japan Rail Pass Guide",
+    "url": "https://destination-guides.example.com/japan-rail-pass-guide",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Destination Guides",
+    "dateAdded": 1580256000000
+  },
+  {
+    "title": "Lisbon Neighborhood Guide",
+    "url": "https://destination-guides.example.com/lisbon-neighborhood-guide",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Destination Guides",
+    "dateAdded": 1580515200000
+  },
+  {
+    "title": "National Parks Index",
+    "url": "https://destination-guides.example.com/national-parks-index",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Destination Guides",
+    "dateAdded": 1580774400000
+  },
+  {
+    "title": "Serious Eats Recipes",
+    "url": "https://food-restaurants.example.com/serious-eats-recipes",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Food & Restaurants",
+    "dateAdded": 1581033600000
+  },
+  {
+    "title": "Michelin Guide Listings",
+    "url": "https://food-restaurants.example.com/michelin-guide-listings",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Food & Restaurants",
+    "dateAdded": 1581292800000
+  },
+  {
+    "title": "Local Ramen Roundup",
+    "url": "https://food-restaurants.example.com/local-ramen-roundup",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Food & Restaurants",
+    "dateAdded": 1581552000000
+  },
+  {
+    "title": "Coffee Roaster Directory",
+    "url": "https://food-restaurants.example.com/coffee-roaster-directory",
+    "expected_category": "Travel & Lifestyle",
+    "expected_sub_category": "Food & Restaurants",
+    "dateAdded": 1581811200000
+  }
+]

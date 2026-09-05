@@ -1,6 +1,8 @@
 import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder } from './bookmarks';
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
+import { reconcileSubcategories } from './reconcile';
+import { buildFallbackSchema } from './defaultSchema';
 
 // Fast reachability probe for URLs using no-cors and an aggressive timeout.
 // Resolves true for reachable or indeterminate hosts; returns false only on DNS/network failure or timeout.
@@ -240,6 +242,57 @@ export class OrganizerService {
                 category: 'Other',
                 sub_category: 'General'
             }));
+        }
+    }
+
+    // One-line shape of the structure the run will actually use, so a thin
+    // schema is visible in the log before thousands of bookmarks are filed
+    // against it.
+    describeSchema(schema) {
+        const categories = Array.isArray(schema?.categories) ? schema.categories : [];
+        const subTotal = categories.reduce((sum, c) => sum + (c.sub_categories?.length || 0), 0);
+        const avg = categories.length > 0 ? (subTotal / categories.length).toFixed(1) : '0';
+        return `Schema: ${categories.length} categories, ${subTotal} subcategories (avg ${avg} per category).`;
+    }
+
+    // Second chance at a usable schema before giving up and using built-in
+    // defaults. Halving the sample relieves the token pressure that truncates
+    // large structures, and the balanced granularity asks for less than '10+'.
+    async retrySchemaOnSmallerSample(activeLinks) {
+        const reducedSample = activeLinks.slice(0, Math.max(1, Math.floor(SCHEMA_SAMPLE_LIMIT / 2)));
+
+        this.onProgress({
+            status: 'info',
+            message: `Retrying schema generation on a smaller sample of ${reducedSample.length.toLocaleString()} bookmarks...`
+        });
+
+        try {
+            const schema = await generateSchema(
+                reducedSample,
+                this.apiKey,
+                this.categories,
+                this.model,
+                '5-10',
+                () => this.isCancelled,
+                ({ delayMs, isRateLimit }) => {
+                    const sec = Math.ceil(delayMs / 1000);
+                    this.onProgress({
+                        status: 'warning',
+                        message: isRateLimit
+                            ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation...`
+                            : `Network issue during schema generation. Retrying in ${sec}s...`
+                    });
+                }
+            );
+
+            this.onProgress({ status: 'success', message: 'Schema generation succeeded on the smaller sample.' });
+            this.onProgress({ status: 'info', message: this.describeSchema(schema) });
+            return schema;
+        } catch (retryErr) {
+            if (this.isCancelled || retryErr?.isCancelled) return null;
+            console.error('Reduced-sample schema generation also failed:', retryErr);
+            this.onProgress({ status: 'warning', message: `Reduced-sample retry also failed: ${retryErr.message}` });
+            return null;
         }
     }
 
@@ -485,22 +538,49 @@ export class OrganizerService {
                 this.onProgress({ status: 'info', message: 'Generated category schema:' });
                 if (schema && schema.categories) {
                     schema.categories.forEach(cat => {
-                        const subCats = cat.sub_categories && cat.sub_categories.length > 0 
-                            ? ` (${cat.sub_categories.join(', ')})` 
+                        const subCats = cat.sub_categories && cat.sub_categories.length > 0
+                            ? ` (${cat.sub_categories.join(', ')})`
                             : '';
                         this.onProgress({ status: 'info', message: `  • ${cat.name}${subCats}` });
                     });
                 }
+                this.onProgress({ status: 'info', message: this.describeSchema(schema) });
             } catch (err) {
                 if (this.isCancelled || err?.isCancelled) {
                     this.onProgress({ status: 'warning', message: 'Process cancelled.' });
                     return null;
                 }
-                console.error('Schema generation failed, falling back to basic categories:', err);
-                this.onProgress({ status: 'warning', message: `Schema generation failed after retries: ${err.message}. Using default categories (no subfolders).` });
-                schema = {
-                    categories: this.categories.map(c => ({ name: c, sub_categories: [] }))
-                };
+
+                console.error('Schema generation failed, falling back to curated default folders:', err);
+                this.onProgress({ status: 'warning', message: `Schema generation failed: ${err.message}` });
+
+                // A schema-less run is what filed every bookmark under "General".
+                // Retry once on a smaller sample and the default granularity —
+                // a token ceiling or an over-ambitious structure is the common
+                // cause, and both ease off with less input.
+                schema = await this.retrySchemaOnSmallerSample(activeLinks);
+
+                if (!schema) {
+                    const { schema: fallback, curatedCount, carriedCount } = buildFallbackSchema(this.categories, err?.partialSchema);
+                    schema = fallback;
+
+                    this.onProgress({
+                        status: 'error',
+                        message: 'AI schema generation failed — used built-in default folders. Re-run for a structure tailored to your bookmarks.'
+                    });
+                    this.onProgress({
+                        status: 'warning',
+                        message: `Fallback structure: ${curatedCount} categor${curatedCount === 1 ? 'y' : 'ies'} from built-in defaults, ${carriedCount} salvaged from the AI response.`
+                    });
+
+                    const structureless = schema.categories.filter(c => c.sub_categories.length === 0).length;
+                    if (structureless > 0) {
+                        this.onProgress({
+                            status: 'warning',
+                            message: `${structureless} custom categor${structureless === 1 ? 'y has' : 'ies have'} no built-in subfolders — those bookmarks will sit directly in the category folder.`
+                        });
+                    }
+                }
             }
 
             if (this.isCancelled) {
@@ -604,6 +684,25 @@ export class OrganizerService {
             }
 
             classifiedActive = results.flat().filter(Boolean);
+
+            // Batches run concurrently and cannot see each other, so this is the
+            // first point where the whole set of subcategories is visible —
+            // and the only place spelling variants and one-bookmark folders can
+            // be resolved.
+            const { classified: reconciled, summary } = reconcileSubcategories(
+                classifiedActive,
+                schema,
+                { subfolderTarget: this.subfolderTarget }
+            );
+            classifiedActive = reconciled;
+
+            const foldedTotal = summary.orphansFolded + summary.cappedFolded;
+            if (summary.proposedKept > 0 || summary.merged > 0 || foldedTotal > 0) {
+                this.onProgress({
+                    status: 'info',
+                    message: `Subcategories: +${summary.proposedKept} AI-created, ~${summary.merged} merged, ${foldedTotal} folded into General.`
+                });
+            }
         }
 
         // Combine classified reachable links with archived unreachable links
@@ -783,6 +882,17 @@ export class OrganizerService {
             .forEach(([category, count]) => {
                 this.onProgress({ status: 'info', message: `  • ${category}: ${count}` });
             });
+
+        // The bug this run guards against is bookmarks silently collecting in
+        // "General", so make that share impossible to miss.
+        const generalCount = finalResults.filter(b => (b.sub_category || '').trim().toLowerCase() === 'general').length;
+        const generalShare = finalResults.length > 0 ? Math.round((generalCount / finalResults.length) * 100) : 0;
+        this.onProgress({
+            status: generalShare > 20 ? 'warning' : 'info',
+            message: generalShare > 20
+                ? `${generalShare}% of bookmarks (${generalCount.toLocaleString()}) landed in General — the AI struggled to find distinct subfolders. Try a different model or re-run.`
+                : `Filed directly under their category (General): ${generalCount.toLocaleString()} (${generalShare}%).`
+        });
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;
