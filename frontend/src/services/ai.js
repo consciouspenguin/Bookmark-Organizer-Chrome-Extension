@@ -40,6 +40,85 @@ function extractJson(content) {
     }
 }
 
+// Repair a JSON object that was cut off mid-generation (the model hit its
+// output token ceiling). Walks the text tracking string state and bracket
+// depth, rewinds to the last point where a value was cleanly completed, drops
+// the partial element after it, and closes the still-open brackets.
+//
+// Only safe where losing the tail is acceptable. That is true for the folder
+// schema (a slightly smaller structure is still usable, and validateSchema
+// judges the result anyway) and false for classification batches, where a
+// dropped tail means silently losing bookmarks — those subdivide and retry
+// instead.
+export function salvagePartialJson(content) {
+    let text = (content || "").trim();
+
+    if (text.includes("```")) {
+        text = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+    }
+
+    const start = text.indexOf("{");
+    if (start === -1) return null;
+    text = text.slice(start);
+
+    const stack = [];
+    let inString = false;
+    let escaped = false;
+    let cut = -1;
+    let closers = null;
+    let prevCut = -1;
+    let prevClosers = null;
+
+    // Only a closed string, a closed bracket, or a comma marks a point we can
+    // safely truncate at. A bare number or keyword may itself be half-written,
+    // so those never become cut points — we rewind past them instead.
+    const markSafe = (index) => {
+        prevCut = cut;
+        prevClosers = closers;
+        cut = index;
+        closers = [...stack];
+    };
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === "\\") escaped = true;
+            else if (ch === '"') {
+                inString = false;
+                markSafe(i + 1);
+            }
+            continue;
+        }
+
+        if (ch === '"') inString = true;
+        else if (ch === "{") stack.push("}");
+        else if (ch === "[") stack.push("]");
+        else if (ch === "}" || ch === "]") {
+            stack.pop();
+            markSafe(i + 1);
+        } else if (ch === ",") {
+            // Cut before the comma so the incomplete element following it goes away.
+            markSafe(i);
+        } else if (ch === ":") {
+            // The string that just closed was a key, not a value. Cutting there
+            // would leave a dangling `{"key"}`, so undo the mark it set.
+            cut = prevCut;
+            closers = prevClosers;
+        }
+    }
+
+    if (cut <= 0 || !closers) return null;
+
+    const repaired = text.slice(0, cut) + closers.reverse().join("");
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        return null;
+    }
+}
+
 // Short, human-readable label for common HTTP status codes so the log/UI
 // says what actually went wrong instead of echoing a provider error blob.
 const STATUS_LABELS = {
@@ -157,7 +236,7 @@ export function isRateLimitError(error) {
 // Validate a completion response and extract its JSON payload. Throws errors
 // that name the actual problem (empty / truncated / invalid JSON) and marks
 // them retryable, since a fresh generation may well succeed.
-function parseModelResponse(data) {
+function parseModelResponse(data, { salvageTruncated = false } = {}) {
     const choice = data.choices?.[0];
     const content = choice?.message?.content;
 
@@ -168,6 +247,9 @@ function parseModelResponse(data) {
     }
 
     if (choice.finish_reason === 'length') {
+        const salvaged = salvageTruncated ? salvagePartialJson(content) : null;
+        if (salvaged) return salvaged;
+
         const error = new Error("model response was cut off at the max_tokens limit");
         error.retryable = true;
         throw error;
@@ -203,7 +285,7 @@ export function geminiModelId(model) {
 // Validate a native Gemini generateContent response and extract its JSON
 // payload, mirroring parseModelResponse: name the actual failure and mark it
 // retryable so a fresh generation can succeed.
-function parseGeminiResponse(data) {
+function parseGeminiResponse(data, { salvageTruncated = false } = {}) {
     if (data.promptFeedback?.blockReason) {
         const error = new Error(`Gemini blocked the request (${data.promptFeedback.blockReason})`);
         throw error; // safety blocks are not transient — do not retry
@@ -219,6 +301,9 @@ function parseGeminiResponse(data) {
     }
 
     if (candidate.finishReason === 'MAX_TOKENS') {
+        const salvaged = salvageTruncated ? salvagePartialJson(content) : null;
+        if (salvaged) return salvaged;
+
         const error = new Error("model response was cut off at the max output token limit");
         error.retryable = true;
         throw error;
@@ -289,7 +374,7 @@ async function fetchWithTimeout(url, options = {}, isCancelled = null) {
 // Single model call routed to the right provider by key prefix. Returns the
 // parsed JSON object. Throws errors tagged with statusCode/retryable so the
 // shared withRetry wrapper can decide whether to back off and try again.
-async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens }, isCancelled = null) {
+async function callModel(apiKey, model, systemContent, userContent, { temperature, maxTokens, salvageTruncated = false }, isCancelled = null) {
     if (detectProvider(apiKey) === 'gemini') {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModelId(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
         const data = await fetchWithTimeout(url, {
@@ -306,7 +391,7 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
             })
         }, isCancelled);
 
-        return parseGeminiResponse(data);
+        return parseGeminiResponse(data, { salvageTruncated });
     }
 
     const data = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
@@ -324,7 +409,7 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
         })
     }, isCancelled);
 
-    return parseModelResponse(data);
+    return parseModelResponse(data, { salvageTruncated });
 }
 
 // Generic retry wrapper with exponential backoff, rate-limit cooldowns, jitter, Retry-After header support, and cancellation
@@ -413,6 +498,12 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
 // prompt serialization and inference instantaneous (< 1-2s).
 export const SCHEMA_SAMPLE_LIMIT = 200;
 
+// The schema JSON is small (8-10 categories x up to ~14 subcategories), but the
+// old 8000 ceiling left no headroom: a run that overshot it was flagged
+// retryable, truncated on all 5 retries, and fell through to the flat-schema
+// fallback that put every bookmark in "General".
+export const SCHEMA_MAX_TOKENS = 16000;
+
 // Evenly spaced sample across the whole list. Bookmark exports are grouped by
 // folder, so spacing preserves topic variety better than taking the first N.
 function sampleForSchema(bookmarks) {
@@ -421,11 +512,115 @@ function sampleForSchema(bookmarks) {
     return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
+// Subcategory counts per category, keyed by the user's granularity setting.
+// `ask` is the range we request from the model, `min` the floor we actually
+// enforce (models routinely undershoot the ask, and rejecting a slightly thin
+// but usable schema would cost a whole extra round-trip), and `max` the ceiling
+// the reconciliation pass enforces after classification.
+export const SUBFOLDER_BOUNDS = {
+    '0-5': { ask: [3, 5], min: 2, max: 5 },
+    '5-10': { ask: [5, 10], min: 3, max: 10 },
+    '10+': { ask: [10, 14], min: 5, max: 16 }
+};
+
+export function subfolderBounds(subfolderTarget) {
+    return SUBFOLDER_BOUNDS[subfolderTarget] || SUBFOLDER_BOUNDS['5-10'];
+}
+
+// Categories that exist to absorb outliers. They are allowed to carry no
+// subcategories of their own, so they never fail validation.
+const CATCH_ALL_CATEGORIES = new Set(['other', 'archive', 'uncategorized', 'general']);
+
+// Subcategory names carrying no organizational information. They are stripped
+// before counting, so a "schema" of nothing but "General" reads as flat —
+// which is exactly what it is, and exactly the bug we are guarding against.
+const FILLER_SUBCATEGORIES = new Set(['general', 'other', 'misc', 'miscellaneous', 'uncategorized', 'none', 'various']);
+
+function isCatchAllCategory(name) {
+    return CATCH_ALL_CATEGORIES.has((name || '').trim().toLowerCase());
+}
+
+// A collection this small cannot support a rich structure — one real
+// subcategory per category is a legitimate result, not a degenerate one.
+const TINY_COLLECTION_THRESHOLD = 40;
+
+// Validate a model-generated schema and return a cleaned copy alongside any
+// reasons it is unusable. Normalizing here means callers (and the classifier)
+// never see filler subcategories or case-duplicate folder names.
+export function validateSchema(schema, { subfolderTarget = '5-10', bookmarkCount = Infinity } = {}) {
+    const issues = [];
+    const rawCategories = Array.isArray(schema?.categories) ? schema.categories : null;
+
+    if (!rawCategories || rawCategories.length === 0) {
+        return { ok: false, issues: ['the response contained no categories'], schema: { categories: [] } };
+    }
+
+    const { min } = subfolderBounds(subfolderTarget);
+    const requiredMin = bookmarkCount < TINY_COLLECTION_THRESHOLD ? 1 : min;
+
+    const categories = [];
+    const seenCategories = new Set();
+
+    for (const raw of rawCategories) {
+        const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
+        if (!name) continue;
+
+        const key = name.toLowerCase();
+        if (seenCategories.has(key)) continue;
+        seenCategories.add(key);
+
+        const seenSubs = new Set();
+        const sub_categories = [];
+        for (const rawSub of Array.isArray(raw.sub_categories) ? raw.sub_categories : []) {
+            if (typeof rawSub !== 'string') continue;
+            const sub = rawSub.trim();
+            if (!sub) continue;
+            const subKey = sub.toLowerCase();
+            // Filler names and a subcategory echoing its own parent add no structure.
+            if (FILLER_SUBCATEGORIES.has(subKey) || subKey === key) continue;
+            if (seenSubs.has(subKey)) continue;
+            seenSubs.add(subKey);
+            sub_categories.push(sub);
+        }
+
+        categories.push({ name, sub_categories });
+    }
+
+    if (categories.length === 0) {
+        return { ok: false, issues: ['no category had a usable name'], schema: { categories: [] } };
+    }
+
+    // Catch-all categories legitimately carry no subcategories, so they take
+    // part in neither the per-category floor nor the overall ratio.
+    const real = categories.filter(c => !isCatchAllCategory(c.name));
+
+    const thin = real
+        .filter(c => c.sub_categories.length < requiredMin)
+        .map(c => `"${c.name}" has ${c.sub_categories.length}`);
+
+    if (thin.length > 0) {
+        issues.push(`every category needs at least ${requiredMin} subcategories, but ${thin.join(', ')}`);
+    }
+
+    // A schema averaging one subcategory per category is flat in practice even
+    // when each category technically clears the floor. Tiny collections are
+    // exempt for the same reason they get a relaxed floor: there is not enough
+    // material to build a rich structure from.
+    const totalSubs = real.reduce((sum, c) => sum + c.sub_categories.length, 0);
+    if (real.length > 0 && bookmarkCount >= TINY_COLLECTION_THRESHOLD && totalSubs <= real.length) {
+        issues.push(`the structure is flat overall (${totalSubs} subcategories across ${real.length} categories)`);
+    }
+
+    return { ok: issues.length === 0, issues, schema: { categories } };
+}
+
 export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", isCancelled = null, onRetry = null) {
+    const { ask: [askMin, askMax] } = subfolderBounds(subfolderTarget);
+
     const subfolderRules = {
-        '0-5': 'aim for roughly 3-5 sub-folders inside each category. Keep it minimal — only create subfolders for truly distinct groups. Err on the side of combining related items into broader folders.',
-        '5-10': 'aim for roughly 5-10 sub-folders inside each category (about 7-8 is the sweet spot). Enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
-        '10+': 'aim for 10+ sub-folders inside each category where needed. Be generous with creating specific subfolders for different topics, ensuring each bookmark has a precise home.'
+        '0-5': 'Keep it minimal — only create subfolders for truly distinct groups, and err on the side of combining related items into broader folders.',
+        '5-10': 'About 7-8 is the sweet spot: enough to be genuinely useful, few enough to scan at a glance. Scale to the content — a content-heavy category can carry more, a sparse one fewer.',
+        '10+': 'Be generous with specific subfolders for different topics, so each bookmark has a precise home.'
     };
 
     const subfolderGuidance = subfolderRules[subfolderTarget] || subfolderRules['5-10'];
@@ -435,31 +630,44 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
         ? `\n    NOTE: The list below is a representative sample of ${schemaSource.length} bookmarks drawn evenly from the full collection. Design the structure for the ENTIRE collection of ${bookmarks.length}.\n`
         : '';
 
-    const prompt = `
+    const buildPrompt = (issues) => {
+        const correction = issues?.length
+            ? `
+    CORRECTION REQUIRED — YOUR PREVIOUS ANSWER WAS REJECTED
+    Reason: ${issues.join('; ')}.
+    Your previous structure was too flat. Every category MUST contain at least ${askMin} distinct, specific subcategories. Never return an empty "sub_categories" array, and never use "General" or "Other" as a subcategory name. Look harder at the bookmarks below and find the real topical groupings.
+`
+            : '';
+
+        return `
     You are an expert information architect designing an intuitive bookmark folder structure for a real person's collection of ${bookmarks.length} bookmarks.
-    ${sampleNote}
+    ${sampleNote}${correction}
 
     GOAL
     Design a clean two-level structure: broad top-level CATEGORIES, each holding nested SUB-CATEGORIES. A person should glance at the folders and instantly know where any link lives — like a well-organized bookshelf, not a sprawling database.
+
+    THE SUBCATEGORIES ARE THE POINT
+    1. For EVERY category you MUST define ${askMin}-${askMax} concrete, mutually exclusive subcategories. ${subfolderGuidance}
+    2. A category with an empty "sub_categories" array is INVALID and will be rejected. Categories are just the shelves; the subcategories are what make the collection browsable.
+    3. Never use "General", "Other", "Misc" or "Various" as a subcategory name. If you are tempted to, you have not looked hard enough at what the bookmarks actually have in common — find the real grouping instead.
 
     PREFERRED TOP-LEVEL CATEGORIES (a starting point — adapt to the actual bookmarks):
     ${JSON.stringify(baseCategories)}
 
     STRUCTURE RULES
-    1. Top-level categories: aim for 8-10 broad, clearly distinct categories. Every bookmark must have a natural home.
-    2. Sub-categories per category: ${subfolderGuidance}
-    3. NON-REDUNDANCY IS CRITICAL. Sub-categories within a category MUST be mutually exclusive. Never create near-duplicates or synonyms as separate folders. Collapse "Tech News" + "Tech Articles" + "Tech Blogs" + "Tech Reports" into ONE folder. Collapse "Career Advice" + "Career Pathways" + "Career Roles" into ONE folder. Collapse "JS" + "JavaScript" into ONE. If two folder names could plausibly hold the same bookmark, merge them.
-    4. Group by the user's INTENT, not surface keywords. Ask "why did they save this?" Links saved for the same purpose belong together even when their titles look different.
+    4. Top-level categories: aim for 8-10 broad, clearly distinct categories. Every bookmark must have a natural home.
+    5. NON-REDUNDANCY IS CRITICAL. Sub-categories within a category MUST be mutually exclusive. Never create near-duplicates or synonyms as separate folders. Collapse "Tech News" + "Tech Articles" + "Tech Blogs" + "Tech Reports" into ONE folder. Collapse "Career Advice" + "Career Pathways" + "Career Roles" into ONE folder. Collapse "JS" + "JavaScript" into ONE. If two folder names could plausibly hold the same bookmark, merge them.
+    6. Group by the user's INTENT, not surface keywords. Ask "why did they save this?" Links saved for the same purpose belong together even when their titles look different.
 
     NAMING RULES
-    5. Use clear, human, real-world names a non-technical person understands. Prefer "Job Search" over "Career Acquisition Pipeline".
-    6. Keep names short (1-3 words), in Title Case. No emojis, no numbering, no slashes.
-    7. A folder's contents should be obvious from its name alone.
+    7. Use clear, human, real-world names a non-technical person understands. Prefer "Job Search" over "Career Acquisition Pipeline".
+    8. Keep names short (1-3 words), in Title Case. No emojis, no numbering, no slashes.
+    9. A folder's contents should be obvious from its name alone.
 
     QUALITY BAR
-    8. No orphan folders: every sub-category should plausibly hold several bookmarks. Never create a folder for a single link — merge it into the nearest fit.
-    9. Categories themselves must not overlap either. Each bookmark should have exactly ONE obvious destination, never two or three.
-    10. Outliers that don't fit cleanly are fine — they belong in a "General" sub-folder or an "Other" category. Do NOT distort the structure to force-fit them.
+    10. No orphan folders: every sub-category should plausibly hold several bookmarks. Never create a folder for a single link — merge it into the nearest fit.
+    11. Categories themselves must not overlap either. Each bookmark should have exactly ONE obvious destination, never two or three.
+    12. A genuine outlier that fits no category belongs in an "Other" category. Do NOT distort the structure to force-fit it, and do NOT invent a filler subcategory for it.
 
     OUTPUT — return ONLY this JSON, no markdown fences, no commentary:
     {
@@ -474,16 +682,38 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
     BOOKMARKS TO ANALYZE:
     ${JSON.stringify(schemaSource.map(b => ({ title: b.title, url: b.url })))}
     `;
+    };
 
     const systemContent = "You are an expert information architect and precise JSON generator. Output only valid JSON. Do not use Markdown blocks.";
 
-    return await withRetry(
-        () => callModel(apiKey, model, systemContent, prompt, { temperature: 0.2, maxTokens: 8000 }, isCancelled),
+    const attempt = (issues) => withRetry(
+        () => callModel(apiKey, model, systemContent, buildPrompt(issues), { temperature: 0.2, maxTokens: SCHEMA_MAX_TOKENS, salvageTruncated: true }, isCancelled),
         5,
         1500,
         isCancelled,
         onRetry
     );
+
+    const options = { subfolderTarget, bookmarkCount: bookmarks.length };
+
+    const first = validateSchema(await attempt(null), options);
+    if (first.ok) return first.schema;
+
+    // One corrective round-trip naming exactly what was wrong. Models that
+    // return a flat structure usually fix it when told so explicitly.
+    if (typeof onRetry === 'function') {
+        onRetry({ attempt: 1, delayMs: 0, error: new Error(first.issues.join('; ')), isRateLimit: false, isSchemaCorrection: true });
+    }
+
+    const second = validateSchema(await attempt(first.issues), options);
+    if (second.ok) return second.schema;
+
+    const error = new Error(`the AI returned a folder structure without usable subcategories (${second.issues.join('; ')})`);
+    error.schemaInvalid = true;
+    // Whatever categories did come back are still better than nothing — the
+    // caller merges them with curated defaults rather than starting from zero.
+    error.partialSchema = second.schema;
+    throw error;
 }
 
 export async function classifyBatch(bookmarks, apiKey, schema, model = "google/gemini-3.1-flash-lite", cleanTitles = false, isCancelled = null, onRetry = null) {

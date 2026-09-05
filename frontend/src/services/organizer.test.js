@@ -580,7 +580,7 @@ describe('classifyBatch and generateSchema default model and cancellation forwar
                         {
                             message: {
                                 content: JSON.stringify({
-                                    categories: [{ name: 'Tech', sub_categories: ['General'] }]
+                                    categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
                                 })
                             }
                         }

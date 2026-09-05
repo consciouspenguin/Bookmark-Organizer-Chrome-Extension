@@ -1,4 +1,5 @@
 import { calculateDateSpan } from '../utils/dates';
+import { shouldCreateSubFolder } from './bookmarks';
 
 // HTML escape function to prevent XSS
 function escapeHtml(text) {
@@ -73,10 +74,16 @@ ${dateSpan ? `     Date range: ${dateSpan}\n` : ''}     It will be read and over
 
     bookmarks.forEach(b => {
         const cat = b.category || "Uncategorized";
-        const sub = b.sub_category || null;
+        const sub = b.sub_category;
 
         if (!structured[cat]) structured[cat] = {};
-        if (sub) {
+
+        // Mirror the browser-write path exactly: `shouldCreateSubFolder` rejects
+        // "General", "None", "Uncategorized" and a subcategory echoing its own
+        // parent. Treating those as real folders here is what produced a literal
+        // "General" folder under every category on HTML import, while the same
+        // run in browser mode filed them directly under the category.
+        if (shouldCreateSubFolder(cat, sub)) {
             if (!structured[cat][sub]) structured[cat][sub] = [];
             structured[cat][sub].push(b);
         } else {
