@@ -131,17 +131,26 @@ export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.htm
     const defaultName = bookmarks?.isFlat ? "chronological_bookmarks.html" : "organized_bookmarks.html";
     const actualFilename = filename === "organized_bookmarks.html" ? defaultName : filename;
     const html = generateNetscapeHTML(bookmarks);
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
 
-    if (typeof chrome !== 'undefined' && chrome.downloads) {
+    let url;
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        try {
+            const blob = new Blob([html], { type: "text/html" });
+            url = URL.createObjectURL(blob);
+        } catch {
+            url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+        }
+    } else {
+        url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.downloads?.download) {
         chrome.downloads.download({
             url: url,
             filename: actualFilename,
             saveAs: true
         });
-    } else {
-        // Fallback for non-extension environment or if permission missing
+    } else if (typeof document !== 'undefined' && document.createElement) {
         const a = document.createElement('a');
         a.href = url;
         a.download = actualFilename;

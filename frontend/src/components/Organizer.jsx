@@ -221,6 +221,129 @@ export default function Organizer() {
 
     const logContainerRef = useRef(null)
     const organizerRef = useRef(null)
+    const portRef = useRef(null)
+
+    // Background job connection & state restoration hook
+    useEffect(() => {
+        // 1. Initial check of session storage to restore any in-flight background job instantly
+        if (typeof chrome !== 'undefined' && chrome.storage?.session) {
+            try {
+                chrome.storage.session.get(['activeJobState', 'organizedData'], (res) => {
+                    if (res?.activeJobState) {
+                        const aj = res.activeJobState;
+                        if (aj.status === 'processing') {
+                            setStatus('processing');
+                            if (typeof aj.progress === 'number') setProgress(aj.progress);
+                            if (aj.activeDateSpan) setActiveDateSpan(aj.activeDateSpan);
+                            if (aj.backgroundNotice !== undefined) setBackgroundNotice(aj.backgroundNotice);
+                            if (Array.isArray(aj.logs) && aj.logs.length > 0) {
+                                setLogs(aj.logs.map(l => ({
+                                    message: l.message,
+                                    timestamp: new Date(l.timestamp)
+                                })));
+                            }
+                        } else if (aj.status === 'complete' && res.organizedData) {
+                            organizedResultsRef.current = res.organizedData;
+                            if (aj.activeDateSpan) setActiveDateSpan(aj.activeDateSpan);
+                            setStatus('complete');
+                            setProgress(100);
+                            if (Array.isArray(aj.logs) && aj.logs.length > 0) {
+                                setLogs(aj.logs.map(l => ({
+                                    message: l.message,
+                                    timestamp: new Date(l.timestamp)
+                                })));
+                            }
+                        }
+                    }
+                });
+            } catch {}
+        }
+
+        // 2. Connect port to service worker for live progress and background execution
+        if (typeof chrome !== 'undefined' && chrome.runtime?.connect) {
+            try {
+                const port = chrome.runtime.connect({ name: 'organizer-channel' });
+                portRef.current = port;
+
+                port.onMessage.addListener((msg) => {
+                    if (!msg || !msg.type) return;
+
+                    if (msg.type === 'STATUS_UPDATE') {
+                        const state = msg.payload;
+                        if (!state) return;
+
+                        if (state.status === 'processing') {
+                            setStatus('processing');
+                            if (typeof state.progress === 'number') setProgress(state.progress);
+                            if (state.activeDateSpan) setActiveDateSpan(state.activeDateSpan);
+                            if (state.backgroundNotice !== undefined) setBackgroundNotice(state.backgroundNotice);
+                            if (Array.isArray(state.logs) && state.logs.length > 0) {
+                                setLogs(state.logs.map(l => ({
+                                    message: l.message,
+                                    timestamp: new Date(l.timestamp)
+                                })));
+                            }
+                        } else if (state.status === 'complete' && state.id) {
+                            if (state.activeDateSpan) setActiveDateSpan(state.activeDateSpan);
+                            setStatus('complete');
+                            setProgress(100);
+                            if (Array.isArray(state.logs) && state.logs.length > 0) {
+                                setLogs(state.logs.map(l => ({
+                                    message: l.message,
+                                    timestamp: new Date(l.timestamp)
+                                })));
+                            }
+                            if (!organizedResultsRef.current && chrome.storage?.session) {
+                                chrome.storage.session.get(['organizedData'], (sRes) => {
+                                    if (sRes?.organizedData) {
+                                        organizedResultsRef.current = sRes.organizedData;
+                                    }
+                                });
+                            }
+                        } else if (state.status === 'error') {
+                            setStatus('error');
+                            setErrorMsg(state.errorMsg || 'Failed to complete background organization.');
+                            setBackgroundNotice('');
+                        } else if (state.status === 'idle') {
+                            setIsCancelling(false);
+                        }
+                    } else if (msg.type === 'JOB_COMPLETE') {
+                        const { results, meta } = msg.payload || {};
+                        if (results) organizedResultsRef.current = results;
+                        if (meta) {
+                            setLastOrganized(meta);
+                            const span = meta.stats?.dateSpan || meta.dateSpan;
+                            if (span) setActiveDateSpan(span);
+                        }
+                        setStatus('complete');
+                        setProgress(100);
+                        setBackgroundNotice('');
+                    } else if (msg.type === 'JOB_ERROR') {
+                        setStatus('error');
+                        setErrorMsg(msg.payload?.message || 'Failed to complete background organization.');
+                        setBackgroundNotice('');
+                    } else if (msg.type === 'JOB_CANCELLED') {
+                        setStatus('idle');
+                        setIsCancelling(false);
+                        setProgress(0);
+                    }
+                });
+
+                port.onDisconnect.addListener(() => {
+                    portRef.current = null;
+                });
+            } catch (err) {
+                console.warn('[Organizer] Failed to connect to background channel:', err);
+            }
+        }
+
+        return () => {
+            if (portRef.current) {
+                try { portRef.current.disconnect(); } catch {}
+                portRef.current = null;
+            }
+        };
+    }, []);
 
     // Non-blocking background sync from chrome.storage (runs AFTER UI is already painted)
     useEffect(() => {
@@ -506,14 +629,24 @@ export default function Organizer() {
     }, [addLog, lastOrganized, activeDateSpan])
 
     const handleCancel = useCallback(() => {
+        if (portRef.current) {
+            try {
+                portRef.current.postMessage({ type: 'CANCEL_JOB' });
+            } catch {}
+        }
         if (organizerRef.current) {
             organizerRef.current.cancel();
-            setIsCancelling(true);
-            addLog('Cancellation requested — halting operations...');
         }
+        setIsCancelling(true);
+        addLog('Cancellation requested — halting operations...');
     }, [addLog]);
 
     const resetApp = useCallback(() => {
+        if (portRef.current) {
+            try {
+                portRef.current.postMessage({ type: 'RESET_JOB' });
+            } catch {}
+        }
         if (organizerRef.current) {
             organizerRef.current.cancel();
         }
@@ -565,6 +698,42 @@ export default function Organizer() {
             setProgress(0);
             setErrorMsg('');
             setBackgroundNotice('');
+
+            // If connected to background service worker, delegate execution
+            let port = portRef.current;
+            if (!port && typeof chrome !== 'undefined' && chrome.runtime?.connect) {
+                try {
+                    port = chrome.runtime.connect({ name: 'organizer-channel' });
+                    portRef.current = port;
+                } catch {}
+            }
+
+            if (port) {
+                try {
+                    port.postMessage({
+                        type: 'START_JOB',
+                        payload: {
+                            config: {
+                                apiKey,
+                                categories,
+                                selectedModel,
+                                subfolderTarget,
+                                sortAlphabetically,
+                                removeDuplicates,
+                                cleanTitles,
+                                flatDateSort,
+                                dateSortOrder,
+                                schemaSortOrder
+                            },
+                            parsedBookmarks
+                        }
+                    });
+                    return;
+                } catch (portErr) {
+                    console.warn('[Organizer] Port postMessage failed, falling back to in-process:', portErr);
+                    portRef.current = null;
+                }
+            }
 
             const { OrganizerService } = await import('../services/organizer')
             organizerRef.current = new OrganizerService(

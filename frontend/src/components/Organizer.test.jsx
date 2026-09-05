@@ -518,4 +518,99 @@ describe('In-process and completion date range display', () => {
             expect(pill.textContent).not.toContain('Alphabetical')
         })
     })
+
+    describe('Background Organization and Reconnection', () => {
+        it('restores in-flight background organization state from session storage on mount', async () => {
+            global.chrome = {
+                storage: {
+                    local: {
+                        get: vi.fn((keys, cb) => cb({})),
+                        set: vi.fn(),
+                        remove: vi.fn()
+                    },
+                    session: {
+                        get: vi.fn((keys, cb) => {
+                            if (keys.includes('activeJobState')) {
+                                cb({
+                                    activeJobState: {
+                                        status: 'processing',
+                                        progress: 68,
+                                        activeDateSpan: '1/1/2024 – 6/1/2024',
+                                        logs: [
+                                            { message: 'Classifying batch 2/4 in background...', timestamp: Date.now() }
+                                        ]
+                                    }
+                                })
+                            } else {
+                                cb({})
+                            }
+                        }),
+                        set: vi.fn()
+                    }
+                }
+            }
+
+            render(<Organizer />)
+
+            await waitFor(() => {
+                expect(screen.getByText(/68%/i)).toBeDefined()
+                expect(screen.getByText(/1\/1\/2024 – 6\/1\/2024/i)).toBeDefined()
+                expect(screen.getByText(/Classifying batch 2\/4 in background/i)).toBeDefined()
+                expect(screen.getByRole('button', { name: /Cancel/i })).toBeDefined()
+            })
+        })
+
+        it('dispatches START_JOB and CANCEL_JOB over port to service worker when connected', async () => {
+            localStorage.setItem('apiKey', 'sk-or-test-port')
+
+            const mockPort = {
+                postMessage: vi.fn(),
+                onMessage: { addListener: vi.fn() },
+                onDisconnect: { addListener: vi.fn() },
+                disconnect: vi.fn()
+            }
+
+            global.chrome = {
+                runtime: {
+                    connect: vi.fn(() => mockPort)
+                },
+                storage: {
+                    local: {
+                        get: vi.fn((keys, cb) => cb({})),
+                        set: vi.fn(),
+                        remove: vi.fn()
+                    },
+                    session: {
+                        get: vi.fn((keys, cb) => cb({})),
+                        set: vi.fn()
+                    }
+                }
+            }
+
+            render(<Organizer />)
+
+            expect(global.chrome.runtime.connect).toHaveBeenCalledWith({ name: 'organizer-channel' })
+
+            act(() => {
+                fireEvent.click(screen.getByRole('button', { name: /Organize My Bookmarks/i }))
+            })
+
+            expect(mockPort.postMessage).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'START_JOB',
+                    payload: expect.objectContaining({
+                        config: expect.objectContaining({ apiKey: 'sk-or-test-port' })
+                    })
+                })
+            )
+
+            // Click Cancel
+            act(() => {
+                fireEvent.click(screen.getByRole('button', { name: /Cancel/i }))
+            })
+
+            expect(mockPort.postMessage).toHaveBeenCalledWith({ type: 'CANCEL_JOB' })
+        })
+    })
 })
+

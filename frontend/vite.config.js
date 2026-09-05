@@ -32,7 +32,21 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     cssCodeSplit: false,
-    modulePreload: { polyfill: false }
+    modulePreload: { polyfill: false },
+    rollupOptions: {
+      input: {
+        index: join(import.meta.dirname, 'index.html'),
+        background: join(import.meta.dirname, 'src/background/index.js')
+      },
+      output: {
+        entryFileNames: (chunkInfo) => {
+          if (chunkInfo.name === 'background') {
+            return 'background.js';
+          }
+          return 'assets/[name]-[hash].js';
+        }
+      }
+    }
   },
   test: {
     environment: 'jsdom'

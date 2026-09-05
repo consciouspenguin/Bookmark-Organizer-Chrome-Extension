@@ -686,7 +686,11 @@ export class OrganizerService {
 
         if (fileBookmarks) {
             this.onProgress({ status: 'info', message: `Generating organized file${dateSpan ? ` (${dateSpan})` : ''}...`, dateSpan });
-            downloadBookmarks(finalResults);
+            try {
+                downloadBookmarks(finalResults);
+            } catch (dlErr) {
+                console.warn('[Organizer] Download invocation deferred:', dlErr);
+            }
         } else {
             // Browser mode: Save bookmarks to Chrome
             this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
