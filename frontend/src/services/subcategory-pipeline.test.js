@@ -24,11 +24,20 @@ const flatSchema = {
     categories: [...new Set(fixture.map(b => b.expected_category))].map(name => ({ name, sub_categories: [] }))
 }
 
-const jsonResponse = (payload) => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(payload) } }] })
-})
+// Both providers' success envelopes, so the same run can be driven through the
+// OpenRouter and the native Gemini response parsers.
+const jsonResponse = (payload, provider = 'openrouter') => {
+    const content = JSON.stringify(payload)
+    return {
+        ok: true,
+        status: 200,
+        json: async () => provider === 'gemini'
+            ? { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: content }] } }] }
+            : { choices: [{ finish_reason: 'stop', message: { content } }] }
+    }
+}
+
+const API_KEYS = { openrouter: 'sk-or-test-key', gemini: 'AIzaSyTestKey' }
 
 const errorResponse = (status) => ({
     ok: false,
@@ -36,7 +45,10 @@ const errorResponse = (status) => ({
     text: async () => JSON.stringify({ error: { message: 'nope' } })
 })
 
-const promptOf = (options) => JSON.parse(options.body).messages[1].content
+const promptOf = (options) => {
+    const body = JSON.parse(options.body)
+    return body.messages ? body.messages[1].content : body.contents[0].parts[0].text
+}
 const isSchemaCall = (prompt) => prompt.includes('BOOKMARKS TO ANALYZE')
 
 // Pulls the batch the classifier was handed back out of its prompt.
@@ -57,7 +69,7 @@ const schemaFromPrompt = (prompt) => {
  * call, last repeating) and classification calls from the fixture's expected
  * labels, optionally distorted by `distort` to simulate model sloppiness.
  */
-const mockAi = ({ schemaResponses, distort = null }) => {
+const mockAi = ({ schemaResponses, distort = null, provider = 'openrouter' }) => {
     let schemaCall = 0
 
     return vi.fn(async (url, options) => {
@@ -66,7 +78,7 @@ const mockAi = ({ schemaResponses, distort = null }) => {
         if (isSchemaCall(prompt)) {
             const next = schemaResponses[Math.min(schemaCall, schemaResponses.length - 1)]
             schemaCall++
-            return typeof next === 'number' ? errorResponse(next) : jsonResponse(next)
+            return typeof next === 'number' ? errorResponse(next) : jsonResponse(next, provider)
         }
 
         const batch = batchFromPrompt(prompt)
@@ -80,21 +92,21 @@ const mockAi = ({ schemaResponses, distort = null }) => {
             return distort ? distort(entry, expected) : entry
         })
 
-        return jsonResponse({ classified })
+        return jsonResponse({ classified }, provider)
     })
 }
 
-const runOrganizer = async (fetchMock, { subfolderTarget = '5-10' } = {}) => {
+const runOrganizer = async (fetchMock, { subfolderTarget = '5-10', provider = 'openrouter', input = bookmarks } = {}) => {
     global.fetch = fetchMock
     const logs = []
     const service = new OrganizerService(
-        'sk-or-test-key',
+        API_KEYS[provider],
         [...new Set(fixture.map(b => b.expected_category))],
         (e) => logs.push(e),
         'google/gemini-3.1-flash-lite',
         subfolderTarget
     )
-    const results = await service.start(bookmarks)
+    const results = await service.start(input)
     return { results, logs, service, messages: logs.map(l => l.message).filter(Boolean) }
 }
 
@@ -205,5 +217,45 @@ describe('subcategory pipeline regression', () => {
         const { messages } = await runOrganizer(mockAi({ schemaResponses: [healthySchema] }))
 
         expect(messages.some(m => m.includes('Filed directly under their category (General)'))).toBe(true)
+    })
+
+    it('produces the same structure over the native Gemini response envelope', async () => {
+        const { results } = await runOrganizer(
+            mockAi({ schemaResponses: [healthySchema], provider: 'gemini' }),
+            { provider: 'gemini' }
+        )
+
+        expect(results).toHaveLength(bookmarks.length)
+        expect(subfoldersIn(results, DOMINANT_CATEGORY).size).toBeGreaterThanOrEqual(3)
+        expect(generalShare(results)).toBeLessThan(0.15)
+    })
+
+    it('keeps a thin collection out of General, at two bookmarks per subcategory', async () => {
+        // The full fixture carries >= 4 bookmarks per subcategory, which sits
+        // above reconciliation's floor and hid the collapse entirely. Two per
+        // subcategory is the shape a real small collection has.
+        const seen = new Map()
+        const thin = fixture.filter(b => {
+            const key = `${b.expected_category}/${b.expected_sub_category}`
+            const n = (seen.get(key) || 0) + 1
+            seen.set(key, n)
+            return n <= 2
+        })
+        const thinInput = thin.map(({ title, url, dateAdded }) => ({ title, url, dateAdded }))
+        const thinSchema = {
+            categories: [...new Set(thin.map(b => b.expected_category))].map(name => ({
+                name,
+                sub_categories: [...new Set(thin.filter(b => b.expected_category === name).map(b => b.expected_sub_category))]
+            }))
+        }
+
+        const { results } = await runOrganizer(
+            mockAi({ schemaResponses: [thinSchema] }),
+            { input: thinInput }
+        )
+
+        expect(results).toHaveLength(thinInput.length)
+        expect(generalShare(results)).toBeLessThan(0.2)
+        expect(subfoldersIn(results, DOMINANT_CATEGORY).size).toBeGreaterThanOrEqual(3)
     })
 })
