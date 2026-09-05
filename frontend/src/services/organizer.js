@@ -79,6 +79,36 @@ export function removeDuplicateUrls(bookmarks) {
     });
 }
 
+// Browser-mode provenance index (spec §7): exact-URL groups, oldest dateAdded wins,
+// numeric id breaks ties. Survivor = group head; everything else is a doomed duplicate.
+export function buildUrlIndex(links) {
+    const index = new Map();
+    for (const link of links) {
+        if (!link.url) continue;
+        if (!index.has(link.url)) index.set(link.url, []);
+        index.get(link.url).push({ id: link.id, dateAdded: link.dateAdded || 0 });
+    }
+    for (const group of index.values()) {
+        group.sort((a, b) => (a.dateAdded - b.dateAdded) || (Number(a.id) - Number(b.id)));
+    }
+    return index;
+}
+
+export function dedupeFromIndex(links, urlIndex) {
+    const survivorIds = new Set();
+    for (const group of urlIndex.values()) {
+        if (group.length > 0 && group[0].id !== undefined) survivorIds.add(String(group[0].id));
+    }
+    const survivors = [];
+    const doomed = [];
+    for (const link of links) {
+        if (link.id === undefined) { survivors.push(link); continue; }
+        if (survivorIds.has(String(link.id))) survivors.push(link);
+        else doomed.push(link);
+    }
+    return { survivors, doomed, duplicatesRemoved: doomed.length };
+}
+
 export { getBookmarkTimestamp, calculateDateSpan } from '../utils/dates';
 import { getBookmarkTimestamp, calculateDateSpan } from '../utils/dates';
 

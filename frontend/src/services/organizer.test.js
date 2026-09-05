@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan, buildUrlIndex, dedupeFromIndex } from './organizer'
 import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId, isNetworkError, isRateLimitError, isRetryableError } from './ai'
 import * as bookmarksExport from './bookmarks_export'
@@ -18,6 +18,35 @@ describe('removeDuplicateUrls', () => {
             { title: 'First', url: 'https://example.com' },
             { title: 'Different', url: 'https://example.com/page' }
         ])
+    })
+})
+
+describe('buildUrlIndex and dedupeFromIndex', () => {
+    const links = [
+        { id: '10', url: 'https://a.com', title: 'A old',  dateAdded: 1500000000000 },
+        { id: '11', url: 'https://a.com', title: 'A new',  dateAdded: 1700000000000 },
+        { id: '9',  url: 'https://a.com', title: 'A tie',  dateAdded: 1500000000000 },
+        { id: '20', url: 'https://b.com', title: 'B',      dateAdded: 1600000000000 }
+    ]
+
+    it('groups nodes by exact URL sorted oldest-first with numeric-id tie-break', () => {
+        const index = buildUrlIndex(links)
+        expect(index.get('https://a.com').map(g => g.id)).toEqual(['9', '10', '11'])
+        expect(index.get('https://b.com').map(g => g.id)).toEqual(['20'])
+    })
+
+    it('keeps the group head as survivor and dooms the rest', () => {
+        const { survivors, doomed, duplicatesRemoved } = dedupeFromIndex(links, buildUrlIndex(links))
+        expect(survivors.map(l => l.id)).toEqual(['9', '20'])
+        expect(doomed.map(l => l.id).sort()).toEqual(['10', '11'])
+        expect(duplicatesRemoved).toBe(2)
+    })
+
+    it('keeps id-less entries as survivors (defensive: non-browser input)', () => {
+        const idless = [{ url: 'https://a.com', title: 'no id', dateAdded: 1 }]
+        const { survivors, doomed } = dedupeFromIndex(idless, buildUrlIndex(idless))
+        expect(survivors).toHaveLength(1)
+        expect(doomed).toHaveLength(0)
     })
 })
 
