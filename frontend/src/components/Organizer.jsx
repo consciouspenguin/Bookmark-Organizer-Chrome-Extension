@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree, ExternalLink } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -167,7 +167,7 @@ export default function Organizer() {
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'schemaSortOrder', 'removeDuplicates', 'cleanTitles', 'flatDateSort', 'dateSortOrder', 'organizedMeta'], (result) => {
+            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'schemaSortOrder', 'removeDuplicates', 'cleanTitles', 'dateSortOrder', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.categories && Array.isArray(result.categories) && result.categories.length > 0) {
                     setCategories(result.categories)
@@ -188,13 +188,14 @@ export default function Organizer() {
                 }
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
                 if (result.cleanTitles !== undefined) setCleanTitles(Boolean(result.cleanTitles))
-                if (typeof result.flatDateSort === 'boolean') setFlatDateSort(result.flatDateSort)
+                // Sort by date added (flat list) is always toggled off by default on extension launch
+                setFlatDateSort(false)
                 if (result.dateSortOrder === 'asc' || result.dateSortOrder === 'desc') setDateSortOrder(result.dateSortOrder)
                 if (result.organizedMeta) setLastOrganized(result.organizedMeta)
             })
 
-            // Proactively remove legacy bloated organizedData from disk LevelDB to ensure instant startup
-            chrome.storage.local.remove('organizedData')
+            // Proactively remove legacy bloated organizedData and flatDateSort from disk LevelDB to ensure clean default startup
+            chrome.storage.local.remove(['organizedData', 'flatDateSort'])
         }
     }, [])
 
@@ -243,8 +244,7 @@ export default function Organizer() {
 
     const handleFlatDateSortToggle = useCallback((enabled) => {
         setFlatDateSort(enabled)
-        updateSetting('flatDateSort', enabled)
-    }, [updateSetting])
+    }, [])
 
     const handleDateSortOrderChange = useCallback((order) => {
         setDateSortOrder(order)
@@ -536,10 +536,62 @@ export default function Organizer() {
                         color: 'var(--text-primary)',
                         fontSize: '1rem',
                         outline: 'none',
-                        marginBottom: '0.5rem',
+                        marginBottom: '0.4rem',
                         boxSizing: 'border-box'
                     }}
                 />
+
+                {/* Minimal Quick Links to Get API Keys */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    marginBottom: '0.65rem',
+                    padding: '0 0.15rem'
+                }}>
+                    <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            color: 'var(--accent)',
+                            fontSize: '0.74rem',
+                            textDecoration: 'none',
+                            opacity: 0.9,
+                            transition: 'opacity 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'underline'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.textDecoration = 'none'; }}
+                    >
+                        <span>Get Google AI Studio Key (Free)</span>
+                        <ExternalLink size={11} />
+                    </a>
+                    <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            color: 'var(--accent)',
+                            fontSize: '0.74rem',
+                            textDecoration: 'none',
+                            opacity: 0.9,
+                            transition: 'opacity 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'underline'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.textDecoration = 'none'; }}
+                    >
+                        <span>Get OpenRouter Key</span>
+                        <ExternalLink size={11} />
+                    </a>
+                </div>
 
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', background: 'var(--surface-alt)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.25rem' }}>
