@@ -89,3 +89,22 @@ describe('generateNetscapeHTML subfolder alignment with browser writes', () => {
         expect(linkTitles(html)).toEqual(['One', 'Two'])
     })
 })
+
+describe('generateNetscapeHTML grouping is prototype-safe', () => {
+    it('exports a category and subcategory named after Object.prototype members', () => {
+        // A proposed sub_category is any Title-Case string the model chose, so
+        // "constructor" would read as already-present via the prototype chain,
+        // skip its array initialisation and throw on push — losing the whole
+        // export to the caller's catch.
+        const html = generateNetscapeHTML([
+            { title: 'A', url: 'https://a.example.com', category: 'Tech', sub_category: 'constructor' },
+            { title: 'B', url: 'https://b.example.com', category: 'Tech', sub_category: 'toString' },
+            { title: 'C', url: 'https://c.example.com', category: '__proto__', sub_category: 'Web Dev' }
+        ])
+
+        expect(folderNames(html)).toEqual(
+            expect.arrayContaining(['Tech', 'constructor', 'toString', '__proto__', 'Web Dev'])
+        )
+        expect(linkTitles(html)).toEqual(['A', 'B', 'C'])
+    })
+})
