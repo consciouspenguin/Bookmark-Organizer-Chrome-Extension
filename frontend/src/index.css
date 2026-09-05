@@ -112,15 +112,78 @@ body {
 #root {
   width: 100%;
   min-height: 100%;
-  padding: 1.25rem 0.85rem;
+  padding: clamp(0.75rem, 2cqi, 1.75rem);
   text-align: center;
   box-sizing: border-box;
 }
 
-@media (min-width: 640px) {
-  #root {
-    padding: 2rem;
-  }
+/* ===========================================================
+   Dynamic Resizing & Sidebar Viewport Responsive System
+   =========================================================== */
+
+/* App Container & Root layout */
+.app-container {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  container-type: inline-size;
+  container-name: sidebar;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  margin-bottom: clamp(0.9rem, 2.5cqi, 1.5rem);
+}
+
+.header-top {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.header-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header-close-btn:hover {
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.header-title-block {
+  text-align: center;
+}
+
+.header-title {
+  font-size: clamp(1.35rem, 4.5cqi, 2.25rem);
+  font-weight: 800;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin: 0;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.header-subtitle {
+  color: var(--text-secondary);
+  font-size: clamp(0.82rem, 2.2cqi, 1.05rem);
+  margin-top: 0.35rem;
+  margin-bottom: 0;
 }
 
 /* Minimalist panel — soft surface, subtle border, gentle blur */
@@ -131,6 +194,214 @@ body {
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow: 0 4px 24px rgba(15, 20, 30, 0.06);
+}
+
+/* Main Responsive Panel */
+.main-glass-panel {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  padding: clamp(1rem, 3cqi, 2rem);
+  transition: padding 0.2s ease, border-radius 0.2s ease;
+}
+
+/* Standard Section Spacing */
+.section-block {
+  margin-bottom: clamp(1.15rem, 2.5cqi, 2rem);
+}
+
+/* Card Panel for Settings / Controls */
+.card-panel {
+  background: var(--surface-alt);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: clamp(0.9rem, 2.2cqi, 1.5rem);
+  transition: padding 0.2s ease;
+}
+
+/* Paired Settings Grid (2 columns on wide, 1 column on compact) */
+.settings-grid-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@container sidebar (min-width: 660px) {
+  .settings-grid-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .settings-grid-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+}
+
+/* Model Selector */
+.model-selector-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  background: var(--surface-solid);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.model-select-btn {
+  flex: 1 1 85px;
+  min-width: 70px;
+  padding: 0.55rem 0.4rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.model-select-btn.active {
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: 0 1px 10px var(--accent-glow);
+}
+
+.model-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.model-badge {
+  font-size: 0.68rem;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.model-desc {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  line-height: 1.4;
+}
+
+/* Flat Date Sort Card */
+.flat-date-card {
+  padding: clamp(0.9rem, 2.2cqi, 1.5rem);
+  background: var(--surface-alt);
+  border-radius: 12px;
+  border: 1.5px solid var(--border-strong);
+  transition: all 0.25s ease;
+}
+
+.flat-date-card.active {
+  background: linear-gradient(135deg, var(--surface-alt), var(--accent-soft));
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 4px 20px var(--accent-glow);
+}
+
+/* Categories Panel */
+.categories-panel {
+  padding: clamp(0.9rem, 2.2cqi, 1.5rem);
+  background: var(--surface-alt);
+  border-radius: 12px;
+}
+
+.categories-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Upload Dropzone */
+.upload-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: clamp(1rem, 2.5cqi, 1.75rem);
+  text-align: center;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upload-dropzone.has-file {
+  background: var(--success-soft);
+  border-color: var(--success);
+}
+
+.upload-dropzone:hover {
+  border-color: var(--accent);
+}
+
+/* Action Button Container */
+.action-button-container {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.action-button-container button {
+  width: 100%;
+}
+
+/* Terminal Output Panel */
+.terminal-panel {
+  background: var(--terminal-bg);
+  border: 1px solid var(--border);
+  height: clamp(220px, 30vh, 320px);
+  overflow-y: auto;
+  padding: clamp(0.75rem, 2cqi, 1rem);
+  font-family: monospace;
+  font-size: clamp(0.78rem, 1.8cqi, 0.9rem);
+  color: var(--terminal-text);
+  border-radius: 12px;
+}
+
+/* Last Run Banner */
+.last-run-banner {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.last-run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+/* Compact Sidebar Adjustments (<= 440px) */
+@container sidebar (max-width: 440px) {
+  .main-glass-panel {
+    border-radius: 12px;
+  }
+  .model-select-btn {
+    flex: 1 1 65px;
+    font-size: 0.76rem;
+    padding: 0.45rem 0.25rem;
+  }
+  .model-badge {
+    font-size: 0.62rem;
+  }
 }
 
 .btn-primary {

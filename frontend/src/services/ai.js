@@ -108,8 +108,8 @@ export function isRetryableError(error, statusCode) {
 
     if (!statusCode) {
         // Network/timeout errors are retryable
-        return error?.name === 'AbortError' ||
-               error?.name === 'TimeoutError' ||
+        return name === 'aborterror' ||
+               name === 'timeouterror' ||
                message.includes('timeout') ||
                message.includes('network') ||
                message.includes('fetch') ||
