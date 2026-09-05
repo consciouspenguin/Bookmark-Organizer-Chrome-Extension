@@ -1,4 +1,4 @@
-import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder } from './bookmarks';
+import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, moveBookmark, removeBookmark, getBookmarkChildren } from './bookmarks';
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 import { reconcileSubcategories } from './reconcile';
@@ -201,12 +201,49 @@ export class OrganizerService {
             isFlat: flatDateSort,
             dateSortOrder,
             schemaSortOrder: this.schemaSortOrder,
-            dateSpan: null
+            dateSpan: null,
+            failedMoves: []
         };
+        this.failedMoves = [];
+        this.snapshotProvider = null;
     }
 
     cancel() {
         this.isCancelled = true;
+    }
+
+    async moveItems(pairs) {
+        const WRITE_CHUNK_SIZE = 15;
+        for (let i = 0; i < pairs.length; i += WRITE_CHUNK_SIZE) {
+            if (this.isCancelled) break;
+            const chunk = pairs.slice(i, i + WRITE_CHUNK_SIZE);
+            await Promise.all(chunk.map(({ item, parentId }) => this.safeMove(item, parentId)));
+        }
+    }
+
+    async safeMove(item, parentId) {
+        if (this.isCancelled) return;
+        if (item.id === undefined) {
+            this.failedMoves.push({ title: item.title, reason: 'bookmark node id missing' });
+            return;
+        }
+        if (item.parentId === parentId) return; // already home — keeps re-runs idempotent (G4)
+        try {
+            await moveBookmark(item.id, { parentId });
+        } catch (err) {
+            this.failedMoves.push({ title: item.title, reason: err?.message || String(err) });
+        }
+    }
+
+    async removeDoomedDuplicates() {
+        for (const node of this.doomedDuplicates || []) {
+            if (this.isCancelled) break;
+            try {
+                await removeBookmark(String(node.id));
+            } catch (err) {
+                this.failedMoves.push({ title: node.title, reason: `duplicate remove failed: ${err?.message || err}` });
+            }
+        }
     }
 
     async classifyWithSubdivision(batchData, schema, label = '') {
@@ -368,6 +405,7 @@ export class OrganizerService {
                                 title: node.title,
                                 url: node.url,
                                 id: node.id,
+                                parentId: node.parentId,
                                 dateAdded: node.dateAdded,
                                 add_date: node.dateAdded ? String(Math.floor(node.dateAdded / 1000)) : undefined
                             });
@@ -398,7 +436,21 @@ export class OrganizerService {
         }
 
         let duplicatesRemoved = 0;
-        if (this.removeDuplicates) {
+        this.doomedDuplicates = [];
+        const isBrowserMode = !fileBookmarks;
+        if (this.removeDuplicates && isBrowserMode) {
+            const urlIndex = buildUrlIndex(allLinks);
+            const dedup = dedupeFromIndex(allLinks, urlIndex);
+            allLinks = dedup.survivors;
+            this.doomedDuplicates = dedup.doomed;
+            duplicatesRemoved = dedup.duplicatesRemoved;
+            this.onProgress({
+                status: 'info',
+                message: duplicatesRemoved > 0
+                    ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
+                    : 'No duplicate URLs found.'
+            });
+        } else if (this.removeDuplicates) {
             const originalCount = allLinks.length;
             allLinks = removeDuplicateUrls(allLinks);
             duplicatesRemoved = originalCount - allLinks.length;
@@ -408,6 +460,8 @@ export class OrganizerService {
                     ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
                     : 'No duplicate URLs found.'
             });
+        }
+        if (duplicatesRemoved > 0) {
             const postDupeSpan = calculateDateSpan(allLinks);
             if (postDupeSpan && postDupeSpan !== this.dateSpan) {
                 this.dateSpan = postDupeSpan;
@@ -524,13 +578,10 @@ export class OrganizerService {
                 const rootId = '2';
                 const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
                 const rootFolder = await findOrCreateFolder(rootId, folderTitle);
+                clearFolderCache();
 
-                const WRITE_CHUNK_SIZE = 15;
-                for (let i = 0; i < finalResults.length; i += WRITE_CHUNK_SIZE) {
-                    if (this.isCancelled) break;
-                    const chunk = finalResults.slice(i, i + WRITE_CHUNK_SIZE);
-                    await Promise.all(chunk.map(b => createBookmark(rootFolder.id, b.title, b.url)));
-                }
+                await this.moveItems(finalResults.map(item => ({ item, parentId: rootFolder.id })));
+                await this.removeDoomedDuplicates();
             }
 
             if (this.isCancelled) {

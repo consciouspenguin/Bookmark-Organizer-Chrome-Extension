@@ -1287,57 +1287,60 @@ describe('OrganizerService flat chronological date sorting', () => {
         expect(results.map(b => b.url)).toEqual(['https://unique.com', 'https://example.com'])
     })
 
-    it('saves directly to a single chronological browser folder when in browser mode', async () => {
-        const browserTree = [
-            {
-                id: '1',
-                title: 'Bookmarks Bar',
-                children: [
-                    { id: '10', title: 'Older Link', url: 'https://older.com', dateAdded: 1500000000000 },
-                    { id: '11', title: 'Newer Link', url: 'https://newer.com', dateAdded: 1700000000000 }
-                ]
-            }
-        ]
-
-        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(browserTree)
-        const mockFolder = { id: 'chron-root-123', title: 'Chronological Bookmarks' }
-        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue(mockFolder)
-        const createdBookmarks = []
-        vi.spyOn(bookmarksService, 'createBookmark').mockImplementation(async (parentId, title, url) => {
-            createdBookmarks.push({ parentId, title, url })
-            return { id: `bm-${createdBookmarks.length}`, parentId, title, url }
-        })
+    it('moves existing browser nodes into the chronological folder instead of creating copies', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks-2026-09-05')
+        store.addUrl('1', '10', 'https://older.com', 'Older Link', 1500000000000)
+        store.addUrl('1', '11', 'https://newer.com', 'Newer Link', 1700000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        vi.spyOn(bookmarksService, 'createBookmark')
+        wireStore(store)
 
         const service = new OrganizerService(
-            'test-key',
-            ['Tech'],
-            () => {},
-            'google/gemini-3.1-flash-lite',
-            '5-10',
-            true,
-            true,
-            false,
-            true, // flatDateSort
-            'desc' // newest first
+            'test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite',
+            '5-10', true, true, false,
+            true,  // flatDateSort
+            'desc'
         )
+        service.snapshotProvider = async () => {} // replaced by the real seam in Task 7; no-op keeps this test focused
 
-        // Null fileBookmarks triggers browser mode
         const results = await service.start(null)
 
         expect(results.map(b => b.title)).toEqual(['Newer Link', 'Older Link'])
-        expect(bookmarksService.findOrCreateFolder).toHaveBeenCalledWith('2', expect.stringContaining('Chronological Bookmarks'))
-        expect(createdBookmarks).toHaveLength(2)
-        expect(createdBookmarks[0]).toEqual({
-            parentId: 'chron-root-123',
-            title: 'Newer Link',
-            url: 'https://newer.com'
-        })
-        expect(createdBookmarks[1]).toEqual({
-            parentId: 'chron-root-123',
-            title: 'Older Link',
-            url: 'https://older.com'
-        })
-        expect(bookmarksExport.downloadBookmarks).not.toHaveBeenCalled()
+        expect(bookmarksService.createBookmark).not.toHaveBeenCalled()
+        expect(store.node('10').parentId).toBe('chron-root-123')
+        expect(store.node('11').parentId).toBe('chron-root-123')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+    })
+
+    it('collapses duplicate URLs by moving the oldest node and removing the rest', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://dupe.com', 'Dupe original', 1500000000000)
+        store.addUrl('2', '12', 'https://dupe.com', 'Dupe mid', 1600000000000)
+        store.addUrl('1', '13', 'https://dupe.com', 'Dupe newest', 1700000000000)
+        store.addUrl('1', '14', 'https://unique.com', 'Unique', 1650000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+
+        const service = new OrganizerService(
+            'test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite',
+            '5-10', true, true, false,
+            true, 'desc'
+        )
+        service.snapshotProvider = async () => {}
+
+        const results = await service.start(null)
+
+        expect(service.stats.duplicatesRemoved).toBe(2)
+        expect(store.node('12')).toBeUndefined()
+        expect(store.node('13')).toBeUndefined()
+        expect(store.node('10')).toBeDefined()
+        expect(store.node('10').parentId).toBe('chron-root-123')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+        expect(results.map(b => b.url).sort()).toEqual(['https://dupe.com', 'https://unique.com'])
     })
 })
 
