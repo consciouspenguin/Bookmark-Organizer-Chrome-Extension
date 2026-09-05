@@ -8,5 +8,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    cssCodeSplit: false,
+    modulePreload: { polyfill: false }
   }
 })
