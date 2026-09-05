@@ -242,7 +242,7 @@ describe('Last run banner date reporting', () => {
         delete global.chrome
     })
 
-    it('labels the recorded date range of the organized bookmarks', () => {
+    it('puts the run time after "Last run:" and trails the unlabeled bookmark range', () => {
         const text = bannerText({
             total: 3462,
             isFlat: false,
@@ -253,10 +253,13 @@ describe('Last run banner date reporting', () => {
             dateSpan: '7/14/2017 – 11/14/2023'
         })
 
-        expect(text).toContain('Dates 7/14/2017 – 11/14/2023')
+        expect(text).toContain(`Last run: ${runTime} · 3,462 bookmarks organized · 7/14/2017 – 11/14/2023`)
+        expect(text).not.toContain('Dates')
+        expect(text).not.toContain('Ran')
+        expect(text).not.toContain('6:13:43')
     })
 
-    it('marks the savedAt timestamp as the run time instead of a bare date', () => {
+    it('widens a legacy stored single date into a full range', () => {
         const text = bannerText({
             total: 3462,
             isFlat: false,
@@ -264,11 +267,10 @@ describe('Last run banner date reporting', () => {
             deadLinksArchived: 0,
             categoriesCount: 12,
             categoryBreakdown: {},
-            dateSpan: '7/14/2017 – 11/14/2023'
+            dateSpan: '9/3/2026'
         })
 
-        expect(text).toContain(`Ran ${runTime}`)
-        expect(text).not.toContain('6:13:43')
+        expect(text).toContain('· 9/3/2026 – 9/3/2026')
     })
 
     it('says the range was not recorded for metadata saved without one, rather than leaving a lone date', () => {
@@ -281,8 +283,8 @@ describe('Last run banner date reporting', () => {
             categoryBreakdown: {}
         })
 
-        expect(text).toContain('Dates not recorded')
-        expect(text).toContain(`Ran ${runTime}`)
+        expect(text).toContain('dates not recorded')
+        expect(text).toContain(`Last run: ${runTime}`)
     })
 
     it('displays date span in the idle schema drawer header when expanded', async () => {
@@ -315,7 +317,7 @@ describe('Last run banner date reporting', () => {
         act(() => {
             fireEvent.click(schemaBtn)
         })
-        expect(screen.getAllByText(/Dates 1\/1\/2021 – 12\/31\/2023/i).length).toBeGreaterThanOrEqual(2)
+        expect(screen.getAllByText(/Dates 1\/1\/2021 – 12\/31\/2023/i).length).toBe(1)
     })
 
     it('backfills dateSpan from chrome.storage.session if organizedMeta lacks dateSpan', async () => {

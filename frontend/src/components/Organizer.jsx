@@ -89,6 +89,9 @@ const formatRunTime = (timestamp) => new Date(timestamp).toLocaleString(undefine
     minute: '2-digit'
 });
 
+// Metadata persisted before the range became unconditional holds a single bare date.
+const formatDateSpan = (span) => (span.includes(' – ') ? span : `${span} – ${span}`);
+
 export default function Organizer() {
     const [status, setStatus] = useState('idle') // idle, processing, complete, error
     const [logs, setLogs] = useState([])
@@ -1462,12 +1465,11 @@ export default function Organizer() {
                 <div className="last-run-banner section-block">
                     <div className="last-run-header">
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            Last run: {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
+                            Last run: <span style={{ color: 'var(--text-muted)' }}>{formatRunTime(lastOrganized.savedAt)}</span> · {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
                             {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
-                            {lastOrganized.stats?.dateSpan ? ` · Dates ${lastOrganized.stats.dateSpan}` : ' · Dates not recorded'}
+                            {lastOrganized.stats?.dateSpan ? ` · ${formatDateSpan(lastOrganized.stats.dateSpan)}` : ' · dates not recorded'}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
                             {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
-                            <span style={{ color: 'var(--text-muted)' }}> · Ran {formatRunTime(lastOrganized.savedAt)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                             {lastOrganized.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
