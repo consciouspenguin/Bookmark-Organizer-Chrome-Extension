@@ -10,5 +10,8 @@ export default defineConfig({
     emptyOutDir: true,
     cssCodeSplit: false,
     modulePreload: { polyfill: false }
+  },
+  test: {
+    environment: 'jsdom'
   }
 })

@@ -98,7 +98,12 @@ export function isRetryableError(error, statusCode) {
     // succeeded but the response was unusable — a fresh attempt may differ.
     if (error?.retryable) return true;
 
+    // Permanent client errors are never retryable
+    if ([400, 401, 402, 403, 404].includes(statusCode)) return false;
+
     const message = (error?.message || '').toLowerCase();
+    const name = (error?.name || '').toLowerCase();
+
     if (message.includes('rate') || message.includes('quota')) return true;
 
     if (!statusCode) {
@@ -348,7 +353,8 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
             // Extract status code if available
             const statusCode = error.statusCode || (error.message?.match(/\b([45]\d{2})\b/) ? parseInt(error.message.match(/\b([45]\d{2})\b/)[1], 10) : null);
             const msgLower = (error?.message || '').toLowerCase();
-            const isRateLimit = statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota');
+            const isPermanent = [400, 401, 402, 403, 404].includes(statusCode);
+            const isRateLimit = !isPermanent && (statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota'));
 
             const maxAttempts = isRateLimit ? 8 : maxRetries;
 

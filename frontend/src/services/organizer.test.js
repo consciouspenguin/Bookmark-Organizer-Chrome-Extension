@@ -1290,18 +1290,15 @@ describe('SCHEMA_SORT_OPTIONS Configuration', () => {
 })
 
 describe('Schema Folder Content Sorting (schemaSortOrder)', () => {
-    let classifySpy
-    let schemaSpy
-
     beforeEach(() => {
-        schemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
             categories: [
                 { name: 'Tech', sub_categories: [] },
                 { name: 'Design', sub_categories: [] }
             ]
         })
 
-        classifySpy = vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
             return batch.map(b => ({
                 ...b,
                 category: b.url.includes('design') ? 'Design' : 'Tech',

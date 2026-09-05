@@ -294,11 +294,6 @@ export default function Organizer() {
         updateSetting('sortAlphabetically', newOrder === 'alpha')
     }, [updateSetting])
 
-    const handleSortToggle = useCallback((enabled) => {
-        const newOrder = enabled ? 'alpha' : 'date-desc'
-        handleSchemaSortChange(newOrder)
-    }, [handleSchemaSortChange])
-
     const handleRemoveDuplicatesToggle = useCallback((enabled) => {
         setRemoveDuplicates(enabled)
         updateSetting('removeDuplicates', enabled)
