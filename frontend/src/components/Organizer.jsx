@@ -499,8 +499,14 @@ export default function Organizer() {
                 (data) => {
                     if (data.status === 'info') {
                         addLog(data.message);
+                    } else if (data.status === 'processing') {
+                        if (data.message) addLog(data.message);
+                        if (typeof data.percent === 'number') setProgress(data.percent);
                     } else if (data.status === 'progress') {
                         setProgress(data.percent);
+                        if (data.clearNotice) {
+                            setBackgroundNotice('');
+                        }
                     } else if (data.status === 'retry') {
                         addLog(data.message);
                         setBackgroundNotice(data.message);
@@ -519,6 +525,7 @@ export default function Organizer() {
                         setStatus('error');
                     } else if (data.status === 'success') {
                         addLog(data.message);
+                        setBackgroundNotice('');
                     } else if (data.status === 'done') {
                         addLog(data.message);
                         setBackgroundNotice('');
