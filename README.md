@@ -21,6 +21,7 @@ Turn years of messy, unsorted bookmarks into a clean, browsable folder structure
   - **Browser mode**: organizes your live Chrome bookmarks into a new dated folder (e.g. `AI Organized Bookmarks-2026-06-10`) under *Other Bookmarks*.
   - **File mode**: drag & drop any exported `bookmarks.html`, get back a cleaned-up, importable HTML file — works with bookmarks from any browser. Embedded favicons are preserved in the output, though for very large bookmark files some or all icons may be skipped to keep memory usage in check (oversized icons and anything beyond a 25 MB total budget). Browsers re-fetch favicons automatically as you visit pages, so skipped icons reappear over time.
 - **Non-Destructive** — Your original bookmarks are never moved or deleted. Organized copies are created alongside them, so you can review before committing.
+- **Persistent Background Execution** — Organization runs reliably in the Chrome background service worker even if the side panel is closed or reopened. Reopening the side panel seamlessly reconnects to live progress and logs, and a native desktop notification alerts you when organization finishes.
 - **Fast & Resilient** — Bookmarks are classified in concurrent batches with automatic rate-limit backoff, sub-batch size adaptation, and a live Cancel button.
 - **Live Progress Log** — A terminal-style output shows the generated schema, batch progress, and timestamps as the run unfolds.
 - **Light / Dark / System Themes** — A slate-blue palette derived from the app icon, with a one-click theme toggle.

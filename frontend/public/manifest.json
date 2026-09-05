@@ -7,7 +7,8 @@
         "storage",
         "bookmarks",
         "downloads",
-        "sidePanel"
+        "sidePanel",
+        "notifications"
     ],
     "host_permissions": [
         "https://openrouter.ai/*",
@@ -32,6 +33,7 @@
         "128": "icon128.png"
     },
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     }
 }
