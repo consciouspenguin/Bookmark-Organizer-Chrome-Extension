@@ -44,8 +44,8 @@ export function getBookmarkTimestamp(bookmark) {
 /**
  * Calculates the formatted date range (oldest date to newest date) from an array of bookmarks.
  * Returns null if no valid timestamps exist.
- * If oldest and newest dates are on the same day, returns the single date.
- * Otherwise returns `${oldestDate} – ${newestDate}`.
+ * Always returns `${oldestDate} – ${newestDate}`, even when both fall on the same day:
+ * a lone date is indistinguishable from a run timestamp in the stats display.
  */
 export function calculateDateSpan(bookmarks) {
     if (!bookmarks) return null;
@@ -73,5 +73,5 @@ export function calculateDateSpan(bookmarks) {
 
     const minDate = new Date(minTime).toLocaleDateString();
     const maxDate = new Date(maxTime).toLocaleDateString();
-    return minDate === maxDate ? minDate : `${minDate} – ${maxDate}`;
+    return `${minDate} – ${maxDate}`;
 }
