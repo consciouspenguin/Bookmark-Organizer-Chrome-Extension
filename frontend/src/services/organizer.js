@@ -77,65 +77,9 @@ export function removeDuplicateUrls(bookmarks) {
     });
 }
 
-// Normalizes both Chrome API dateAdded (milliseconds) and Netscape add_date (seconds) to milliseconds
-export function getBookmarkTimestamp(bookmark) {
-    if (!bookmark) return 0;
-    // Chrome API dateAdded is epoch milliseconds
-    if (typeof bookmark.dateAdded === 'number' && !isNaN(bookmark.dateAdded) && bookmark.dateAdded > 0) {
-        return bookmark.dateAdded < 1e11 ? bookmark.dateAdded * 1000 : bookmark.dateAdded;
-    }
-    if (typeof bookmark.dateAdded === 'string') {
-        const trimmed = bookmark.dateAdded.trim();
-        if (/^\d+$/.test(trimmed)) {
-            const num = Number(trimmed);
-            return num > 0 ? (num < 1e11 ? num * 1000 : num) : 0;
-        }
-        const parsed = Date.parse(trimmed);
-        if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    // Netscape HTML add_date is epoch seconds
-    if (bookmark.add_date) {
-        if (typeof bookmark.add_date === 'number' && !isNaN(bookmark.add_date) && bookmark.add_date > 0) {
-            return bookmark.add_date < 1e11 ? bookmark.add_date * 1000 : bookmark.add_date;
-        }
-        if (typeof bookmark.add_date === 'string') {
-            const trimmed = bookmark.add_date.trim();
-            if (/^\d+$/.test(trimmed)) {
-                const num = Number(trimmed);
-                return num > 0 ? (num < 1e11 ? num * 1000 : num) : 0;
-            }
-            const parsed = Date.parse(trimmed);
-            if (!isNaN(parsed) && parsed > 0) return parsed;
-        }
-    }
-    return 0;
-}
+export { getBookmarkTimestamp, calculateDateSpan } from '../utils/dates';
+import { getBookmarkTimestamp, calculateDateSpan } from '../utils/dates';
 
-/**
- * Calculates the formatted date range (oldest date to newest date) from an array of bookmarks.
- * Returns null if no valid timestamps exist.
- * If oldest and newest dates are on the same day, returns the single date.
- * Otherwise returns `${oldestDate} – ${newestDate}`.
- */
-export function calculateDateSpan(bookmarks) {
-    if (!Array.isArray(bookmarks) || bookmarks.length === 0) return null;
-    let minTime = Infinity;
-    let maxTime = -Infinity;
-
-    for (let i = 0; i < bookmarks.length; i++) {
-        const t = getBookmarkTimestamp(bookmarks[i]);
-        if (t > 0) {
-            if (t < minTime) minTime = t;
-            if (t > maxTime) maxTime = t;
-        }
-    }
-
-    if (minTime === Infinity || maxTime === -Infinity) return null;
-
-    const minDate = new Date(minTime).toLocaleDateString();
-    const maxDate = new Date(maxTime).toLocaleDateString();
-    return minDate === maxDate ? minDate : `${minDate} – ${maxDate}`;
-}
 
 // Normalizes and extracts hostname/domain from bookmark URL
 export function getBookmarkDomain(bookmark) {
@@ -342,7 +286,21 @@ export class OrganizerService {
             traverse(tree);
         }
 
-        this.onProgress({ status: 'info', message: `Found ${allLinks.length} bookmarks.` });
+        const initialDateSpan = calculateDateSpan(allLinks);
+        this.dateSpan = initialDateSpan;
+        this.stats.dateSpan = initialDateSpan;
+
+        this.onProgress({
+            status: 'info',
+            message: initialDateSpan
+                ? `Found ${allLinks.length.toLocaleString()} bookmarks (Date range: ${initialDateSpan}).`
+                : `Found ${allLinks.length.toLocaleString()} bookmarks.`,
+            dateSpan: initialDateSpan,
+            totalBookmarks: allLinks.length
+        });
+        if (initialDateSpan) {
+            this.onProgress({ status: 'info', message: `Total date range: ${initialDateSpan}`, dateSpan: initialDateSpan });
+        }
 
         let duplicatesRemoved = 0;
         if (this.removeDuplicates) {
@@ -355,6 +313,16 @@ export class OrganizerService {
                     ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
                     : 'No duplicate URLs found.'
             });
+            const postDupeSpan = calculateDateSpan(allLinks);
+            if (postDupeSpan && postDupeSpan !== this.dateSpan) {
+                this.dateSpan = postDupeSpan;
+                this.stats.dateSpan = postDupeSpan;
+                this.onProgress({
+                    status: 'info',
+                    message: `Date range after deduplication: ${postDupeSpan}`,
+                    dateSpan: postDupeSpan
+                });
+            }
         }
 
         if (allLinks.length === 0) {
@@ -435,9 +403,10 @@ export class OrganizerService {
 
             finalResults.isFlat = true;
 
-            const dateSpan = calculateDateSpan(finalResults);
+            const dateSpan = calculateDateSpan(finalResults) || this.dateSpan;
+            this.dateSpan = dateSpan;
             if (dateSpan) {
-                this.onProgress({ status: 'info', message: `Date range: ${dateSpan}` });
+                this.onProgress({ status: 'info', message: `Date range: ${dateSpan}`, dateSpan });
             }
 
             this.stats = {
@@ -453,10 +422,10 @@ export class OrganizerService {
             finalResults.stats = this.stats;
 
             if (fileBookmarks) {
-                this.onProgress({ status: 'info', message: 'Generating chronological file...' });
+                this.onProgress({ status: 'info', message: `Generating chronological file${dateSpan ? ` (${dateSpan})` : ''}...`, dateSpan });
                 downloadBookmarks(finalResults);
             } else {
-                this.onProgress({ status: 'info', message: `Saving ${finalResults.length} chronological bookmarks to browser...` });
+                this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} chronological bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
                 const rootId = '2';
                 const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
                 const rootFolder = await findOrCreateFolder(rootId, folderTitle);
@@ -712,12 +681,15 @@ export class OrganizerService {
             return null;
         }
 
+        let dateSpan = calculateDateSpan(finalResults) || this.dateSpan;
+        this.dateSpan = dateSpan;
+
         if (fileBookmarks) {
-            this.onProgress({ status: 'info', message: 'Generating organized file...' });
+            this.onProgress({ status: 'info', message: `Generating organized file${dateSpan ? ` (${dateSpan})` : ''}...`, dateSpan });
             downloadBookmarks(finalResults);
         } else {
             // Browser mode: Save bookmarks to Chrome
-            this.onProgress({ status: 'info', message: `Saving ${finalResults.length} bookmarks to browser...` });
+            this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
             
             const rootId = '2'; // 'Other Bookmarks' usually
             const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
@@ -782,9 +754,10 @@ export class OrganizerService {
             categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
         }
 
-        const dateSpan = calculateDateSpan(finalResults);
+        dateSpan = calculateDateSpan(finalResults) || dateSpan || this.dateSpan;
+        this.dateSpan = dateSpan;
         if (dateSpan) {
-            this.onProgress({ status: 'info', message: `Total date range: ${dateSpan}` });
+            this.onProgress({ status: 'info', message: `Total date range: ${dateSpan}`, dateSpan });
         }
 
         this.stats = {

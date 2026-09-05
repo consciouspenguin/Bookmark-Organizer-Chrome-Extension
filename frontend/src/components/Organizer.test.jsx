@@ -209,3 +209,259 @@ describe('Organizer Component UI Tests', () => {
         resolveStart(null)
     })
 })
+
+describe('Last run banner date reporting', () => {
+    const savedAt = new Date(2026, 8, 4, 18, 13, 43).getTime()
+    const runTime = new Date(savedAt).toLocaleString(undefined, {
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+    })
+
+    const bannerText = (stats) => {
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({ organizedMeta: { count: 3462, savedAt, stats } })),
+                    set: vi.fn(),
+                    remove: vi.fn()
+                },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+        const { container } = render(<Organizer />)
+        const banner = container.querySelector('.last-run-banner')
+        expect(banner).not.toBeNull()
+        return banner.textContent
+    }
+
+    afterEach(() => {
+        cleanup()
+        delete global.chrome
+    })
+
+    it('labels the recorded date range of the organized bookmarks', () => {
+        const text = bannerText({
+            total: 3462,
+            isFlat: false,
+            duplicatesRemoved: 0,
+            deadLinksArchived: 0,
+            categoriesCount: 12,
+            categoryBreakdown: {},
+            dateSpan: '7/14/2017 – 11/14/2023'
+        })
+
+        expect(text).toContain('Dates 7/14/2017 – 11/14/2023')
+    })
+
+    it('marks the savedAt timestamp as the run time instead of a bare date', () => {
+        const text = bannerText({
+            total: 3462,
+            isFlat: false,
+            duplicatesRemoved: 0,
+            deadLinksArchived: 0,
+            categoriesCount: 12,
+            categoryBreakdown: {},
+            dateSpan: '7/14/2017 – 11/14/2023'
+        })
+
+        expect(text).toContain(`Ran ${runTime}`)
+        expect(text).not.toContain('6:13:43')
+    })
+
+    it('says the range was not recorded for metadata saved without one, rather than leaving a lone date', () => {
+        const text = bannerText({
+            total: 3462,
+            isFlat: false,
+            duplicatesRemoved: 0,
+            deadLinksArchived: 0,
+            categoriesCount: 12,
+            categoryBreakdown: {}
+        })
+
+        expect(text).toContain('Dates not recorded')
+        expect(text).toContain(`Ran ${runTime}`)
+    })
+
+    it('displays date span in the idle schema drawer header when expanded', async () => {
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({
+                        organizedMeta: {
+                            count: 10,
+                            savedAt,
+                            stats: {
+                                total: 10,
+                                isFlat: false,
+                                duplicatesRemoved: 0,
+                                deadLinksArchived: 0,
+                                categoriesCount: 1,
+                                categoryBreakdown: { 'Tech': 10 },
+                                dateSpan: '1/1/2021 – 12/31/2023'
+                            }
+                        }
+                    })),
+                    set: vi.fn(),
+                    remove: vi.fn()
+                },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+        render(<Organizer />)
+        const schemaBtn = screen.getByRole('button', { name: /Schema/i })
+        act(() => {
+            fireEvent.click(schemaBtn)
+        })
+        expect(screen.getAllByText(/Dates 1\/1\/2021 – 12\/31\/2023/i).length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('backfills dateSpan from chrome.storage.session if organizedMeta lacks dateSpan', async () => {
+        const mockSet = vi.fn()
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({
+                        organizedMeta: {
+                            count: 2,
+                            savedAt,
+                            stats: {
+                                total: 2,
+                                isFlat: false
+                            }
+                        }
+                    })),
+                    set: mockSet,
+                    remove: vi.fn()
+                },
+                session: {
+                    get: vi.fn((keys, cb) => cb({
+                        organizedData: [
+                            { url: 'https://a.com', dateAdded: 1609459200000 }, // 2021-01-01
+                            { url: 'https://b.com', dateAdded: 1703980800000 }  // 2023-12-31
+                        ]
+                    })),
+                    set: vi.fn()
+                }
+            }
+        }
+
+        render(<Organizer />)
+
+        await waitFor(() => {
+            expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({
+                organizedMeta: expect.objectContaining({
+                    dateSpan: expect.stringMatching(/\d{1,2}\/\d{1,2}\/\d{4}/)
+                })
+            }))
+        })
+    })
+})
+
+describe('In-process and completion date range display', () => {
+    afterEach(() => {
+        cleanup()
+        delete global.chrome
+    })
+
+    it('renders active date range pill while processing when dateSpan is received', async () => {
+        localStorage.setItem('apiKey', 'sk-or-test-12345')
+
+        OrganizerService.mockImplementation(function (apiKey, categories, onProgress) {
+            this.start = vi.fn(async () => {
+                act(() => {
+                    onProgress({
+                        status: 'info',
+                        message: 'Found 5 bookmarks',
+                        dateSpan: '5/10/2018 – 8/20/2024'
+                    })
+                })
+                act(() => {
+                    onProgress({
+                        status: 'processing',
+                        message: 'Classifying bookmarks...',
+                        percent: 30
+                    })
+                })
+                // keep in processing state for check
+                return new Promise(() => {})
+            })
+            this.cancel = vi.fn()
+            this.isCancelled = false
+        })
+
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({})),
+                    set: vi.fn(),
+                    remove: vi.fn()
+                },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+
+        render(<Organizer />)
+
+        const startButton = screen.getByRole('button', { name: /Organize My Bookmarks/i })
+        act(() => {
+            fireEvent.click(startButton)
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText(/5\/10\/2018 – 8\/20\/2024/i)).toBeDefined()
+        })
+    })
+
+    it('displays date range under download button on completion screen', async () => {
+        localStorage.setItem('apiKey', 'sk-or-test-12345')
+
+        OrganizerService.mockImplementation(function (apiKey, categories, onProgress) {
+            this.start = vi.fn(async () => {
+                act(() => {
+                    onProgress({ status: 'done', message: 'Complete!' })
+                })
+                const results = [
+                    { title: 'Item 1', url: 'https://example.com/1', dateAdded: 1609459200000 }
+                ]
+                results.stats = {
+                    total: 1,
+                    isFlat: false,
+                    duplicatesRemoved: 0,
+                    deadLinksArchived: 0,
+                    categoriesCount: 1,
+                    dateSpan: '1/1/2021'
+                }
+                return results
+            })
+            this.cancel = vi.fn()
+            this.isCancelled = false
+        })
+
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({})),
+                    set: vi.fn(),
+                    remove: vi.fn()
+                },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+
+        render(<Organizer />)
+
+        const startButton = screen.getByRole('button', { name: /Organize My Bookmarks/i })
+        act(() => {
+            fireEvent.click(startButton)
+        })
+
+        await waitFor(() => {
+            expect(screen.getByText(/All Done! Check your "AI Organized Bookmarks" folder/i)).toBeDefined()
+            expect(screen.getByText(/Date range:/i)).toBeDefined()
+            expect(screen.getByRole('button', { name: /Download Organized Bookmarks/i }).getAttribute('title')).toContain('Dates 1/1/2021')
+        })
+    })
+})

@@ -1,3 +1,5 @@
+import { calculateDateSpan } from '../utils/dates';
+
 // HTML escape function to prevent XSS
 function escapeHtml(text) {
     if (!text) return '';
@@ -40,9 +42,10 @@ function sanitizeUrl(url) {
 
 export function generateNetscapeHTML(bookmarks) {
     const now = Math.floor(Date.now() / 1000);
+    const dateSpan = bookmarks?.stats?.dateSpan || bookmarks?.dateSpan || calculateDateSpan(bookmarks);
     let html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
 <!-- This is an automatically generated file.
-     It will be read and overwritten.
+${dateSpan ? `     Date range: ${dateSpan}\n` : ''}     It will be read and overwritten.
      DO NOT EDIT! -->
 <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
 <TITLE>Bookmarks</TITLE>

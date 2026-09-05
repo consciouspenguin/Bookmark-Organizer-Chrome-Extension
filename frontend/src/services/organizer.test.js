@@ -1598,5 +1598,27 @@ describe('total date range in categorized mode and oldest first sorting', () => 
     })
 })
 
+describe('Netscape HTML export and timestamp parsing', () => {
+    it('includes Date range in the Netscape HTML header comment when dateSpan is present', () => {
+        const bookmarks = [
+            { title: 'Old Link', url: 'https://old.com', add_date: '1500000000' },
+            { title: 'New Link', url: 'https://new.com', add_date: '1700000000' }
+        ]
+        const html = bookmarksExport.generateNetscapeHTML(bookmarks)
+        expect(html).toContain('<!-- This is an automatically generated file.')
+        expect(html).toContain('Date range:')
+        expect(html).toContain(calculateDateSpan(bookmarks))
+    })
 
-
+    it('getBookmarkTimestamp accurately parses milliseconds, seconds, and ISO strings across all field names', () => {
+        expect(getBookmarkTimestamp({ dateAdded: 1609459200000 })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ dateAdded: 1609459200 })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ dateAdded: '1609459200000' })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ date_added: 1609459200000 })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ add_date: 1609459200 })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ ADD_DATE: '1609459200' })).toBe(1609459200000)
+        expect(getBookmarkTimestamp({ date: '2021-01-01T00:00:00.000Z' })).toBe(1609459200000)
+        expect(getBookmarkTimestamp(null)).toBe(0)
+        expect(getBookmarkTimestamp({})).toBe(0)
+    })
+})
