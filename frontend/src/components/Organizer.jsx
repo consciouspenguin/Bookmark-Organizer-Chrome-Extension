@@ -294,11 +294,6 @@ export default function Organizer() {
         updateSetting('sortAlphabetically', newOrder === 'alpha')
     }, [updateSetting])
 
-    const handleSortToggle = useCallback((enabled) => {
-        const newOrder = enabled ? 'alpha' : 'date-desc'
-        handleSchemaSortChange(newOrder)
-    }, [handleSchemaSortChange])
-
     const handleRemoveDuplicatesToggle = useCallback((enabled) => {
         setRemoveDuplicates(enabled)
         updateSetting('removeDuplicates', enabled)
@@ -500,7 +495,12 @@ export default function Organizer() {
                     if (data.status === 'info') {
                         addLog(data.message);
                     } else if (data.status === 'progress') {
-                        setProgress(data.percent);
+                        if (typeof data.percent === 'number') setProgress(data.percent);
+                        if (data.message) addLog(data.message);
+                        setBackgroundNotice('');
+                    } else if (data.status === 'processing') {
+                        if (data.message) addLog(data.message);
+                        if (typeof data.percent === 'number') setProgress(data.percent);
                     } else if (data.status === 'retry') {
                         addLog(data.message);
                         setBackgroundNotice(data.message);

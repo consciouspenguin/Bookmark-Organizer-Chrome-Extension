@@ -98,17 +98,30 @@ function isRetryableError(error, statusCode) {
     // succeeded but the response was unusable — a fresh attempt may differ.
     if (error?.retryable) return true;
 
+    // Permanent client errors are never retryable
+    if ([400, 401, 402, 403, 404].includes(statusCode)) return false;
+
     const message = (error?.message || '').toLowerCase();
+    const name = (error?.name || '').toLowerCase();
+
     if (message.includes('rate') || message.includes('quota')) return true;
 
     if (!statusCode) {
-        // Network/timeout errors are retryable
-        return message.includes('timeout') || message.includes('network') || message.includes('fetch');
+        // Network/timeout/abort errors are retryable
+        return name === 'aborterror' ||
+            name === 'timeouterror' ||
+            message.includes('timeout') ||
+            message.includes('timed out') ||
+            message.includes('time out') ||
+            message.includes('network') ||
+            message.includes('fetch') ||
+            message.includes('abort') ||
+            message.includes('connection');
     }
 
     // Retryable HTTP status codes:
-    // 429 = Rate Limited, 500 = Server Error, 502 = Bad Gateway, 503 = Service Unavailable, 504 = Gateway Timeout
-    return [429, 500, 502, 503, 504].includes(statusCode);
+    // 408 = Request Timeout, 429 = Rate Limited, 500 = Server Error, 502 = Bad Gateway, 503 = Service Unavailable, 504 = Gateway Timeout
+    return [408, 429, 500, 502, 503, 504].includes(statusCode);
 }
 
 // Validate a completion response and extract its JSON payload. Throws errors
@@ -197,9 +210,21 @@ const REQUEST_TIMEOUT_MS = 30000;
 
 async function fetchWithTimeout(url, options = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error("request timeout")), REQUEST_TIMEOUT_MS);
+    let isTimeout = false;
+    const timer = setTimeout(() => {
+        isTimeout = true;
+        controller.abort();
+    }, REQUEST_TIMEOUT_MS);
     try {
         return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+        if (isTimeout) {
+            const timeoutErr = new Error("the request timed out");
+            timeoutErr.statusCode = 408;
+            timeoutErr.retryable = true;
+            throw timeoutErr;
+        }
+        throw err;
     } finally {
         clearTimeout(timer);
     }
@@ -256,7 +281,6 @@ async function callModel(apiKey, model, systemContent, userContent, { temperatur
 
 // Generic retry wrapper with exponential backoff, rate-limit cooldowns, jitter, Retry-After header support, and cancellation
 export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCancelled = null, onRetry = null) {
-    let lastError;
     let attempt = 1;
 
     const checkCancelled = () => {
@@ -274,8 +298,6 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
         try {
             return await fn();
         } catch (error) {
-            lastError = error;
-
             if (error?.isCancelled) {
                 throw error;
             }
@@ -283,7 +305,8 @@ export async function withRetry(fn, maxRetries = 5, initialDelayMs = 1500, isCan
             // Extract status code if available
             const statusCode = error.statusCode || (error.message?.match(/(\d{3})/) ? parseInt(error.message.match(/(\d{3})/)[1], 10) : null);
             const msgLower = (error?.message || '').toLowerCase();
-            const isRateLimit = statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota');
+            const isPermanent = [400, 401, 402, 403, 404].includes(statusCode);
+            const isRateLimit = !isPermanent && (statusCode === 429 || msgLower.includes('rate') || msgLower.includes('quota'));
 
             const maxAttempts = isRateLimit ? 8 : maxRetries;
 

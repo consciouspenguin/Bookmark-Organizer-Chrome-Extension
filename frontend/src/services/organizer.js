@@ -111,6 +111,51 @@ export function getBookmarkDomain(bookmark) {
     }
 }
 
+// Determines if an error CANNOT be resolved by subdividing a batch into smaller chunks.
+// Subdividing is ONLY beneficial for prompt/payload size limits, model token truncation, or malformed JSON.
+// Network drops, timeouts, rate limits, 5xx server outages, and 4xx client errors should NEVER subdivide.
+export function isNonSubdividableError(err) {
+    if (!err) return false;
+    const statusCode = err.statusCode || (err.message?.match(/(\d{3})/) ? parseInt(err.message.match(/(\d{3})/)[1], 10) : null);
+    const msg = (err.message || '').toLowerCase();
+    const name = (err.name || '').toLowerCase();
+
+    // 1. Permanent client errors (400 Bad Request, 401 Unauthorized, 402 Payment Required, 403 Forbidden, 404 Not Found)
+    if ([400, 401, 402, 403, 404].includes(statusCode)) {
+        return true;
+    }
+
+    // 2. Server-side errors (500 Internal Error, 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout)
+    if ([500, 502, 503, 504].includes(statusCode)) {
+        return true;
+    }
+
+    // 3. Rate limit / quota exhausted (429 Too Many Requests, quota exceeded)
+    if (statusCode === 429 || msg.includes('rate limit') || msg.includes('429') || msg.includes('quota') || msg.includes('too many requests')) {
+        return true;
+    }
+
+    // 4. Network, DNS, offline, connection drop, or timeout errors
+    if (
+        name === 'aborterror' ||
+        name === 'timeouterror' ||
+        msg.includes('fetch') ||
+        msg.includes('network') ||
+        msg.includes('timeout') ||
+        msg.includes('timed out') ||
+        msg.includes('time out') ||
+        msg.includes('connection') ||
+        msg.includes('offline') ||
+        msg.includes('econnrefused') ||
+        msg.includes('enotfound') ||
+        msg.includes('internet')
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
 export class OrganizerService {
     constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false, flatDateSort = false, dateSortOrder = "desc", schemaSortOrder = undefined) {
         this.apiKey = apiKey;
@@ -176,11 +221,9 @@ export class OrganizerService {
                 return [];
             }
 
-            // Permanent errors (like 401 Unauthorized, 403 Forbidden, 404 Model Not Found)
-            // cannot be resolved by splitting the batch. Avoid pointless recursive subdivision.
-            const isPermanentApiError = [401, 403, 404].includes(err?.statusCode);
-
-            if (batchData.length > 5 && !isPermanentApiError) {
+            // Only subdivide if batch size > 5 AND the error is an issue with batch/payload size or model output truncation.
+            // Avoid pointlessly subdividing on network errors, rate limits, 5xx server issues, or permanent client errors.
+            if (batchData.length > 5 && !isNonSubdividableError(err)) {
                 const mid = Math.ceil(batchData.length / 2);
                 this.onProgress({
                     status: 'info',
@@ -396,7 +439,7 @@ export class OrganizerService {
                     this.model,
                     this.subfolderTarget,
                     () => this.isCancelled,
-                    ({ delayMs, isRateLimit, attempt }) => {
+                    ({ delayMs, isRateLimit }) => {
                         const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
                             status: 'warning',
@@ -470,7 +513,7 @@ export class OrganizerService {
                         this.model,
                         this.cleanTitles,
                         () => this.isCancelled,
-                        ({ delayMs, isRateLimit, attempt }) => {
+                        ({ delayMs, isRateLimit }) => {
                             const sec = Math.ceil(delayMs / 1000);
                             this.onProgress({
                                 status: 'warning',
@@ -485,7 +528,11 @@ export class OrganizerService {
                     // Accumulate results
                     results[index] = classified;
                     processed += batchData.length;
-                    this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
+                    this.onProgress({
+                        status: 'progress',
+                        percent: Math.min(100, Math.round((processed / total) * 100)),
+                        message: `Classified batch ${currentIdx + 1}/${batches.length} (${classified.length} bookmarks).`
+                    });
 
                 } catch (err) {
                     if (this.isCancelled || err?.isCancelled) return;
