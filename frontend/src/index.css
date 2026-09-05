@@ -32,12 +32,12 @@
   --error: #e07a7a;
   --error-soft: rgba(224, 122, 122, 0.12);
 
-  --amber: #f59e0b;
-  --amber-hover: #fbbf24;
-  --amber-soft: rgba(245, 158, 11, 0.12);
-  --amber-border: rgba(245, 158, 11, 0.40);
-  --amber-gradient: linear-gradient(135deg, #d97706, #f59e0b);
-  --amber-glow: rgba(245, 158, 11, 0.25);
+  --amber: #94a3b8;
+  --amber-hover: #cbd5e1;
+  --amber-soft: rgba(148, 163, 184, 0.12);
+  --amber-border: rgba(148, 163, 184, 0.35);
+  --amber-gradient: linear-gradient(135deg, #64748b, #94a3b8);
+  --amber-glow: rgba(148, 163, 184, 0.20);
 
   --terminal-bg: #080b10;
   --terminal-text: #8fa2c4;
@@ -73,12 +73,12 @@
   --error: #c45656;
   --error-soft: rgba(196, 86, 86, 0.10);
 
-  --amber: #d97706;
-  --amber-hover: #b45309;
-  --amber-soft: rgba(217, 119, 6, 0.10);
-  --amber-border: rgba(217, 119, 6, 0.40);
-  --amber-gradient: linear-gradient(135deg, #b45309, #d97706);
-  --amber-glow: rgba(217, 119, 6, 0.18);
+  --amber: #475569;
+  --amber-hover: #334155;
+  --amber-soft: rgba(71, 85, 105, 0.08);
+  --amber-border: rgba(71, 85, 105, 0.30);
+  --amber-gradient: linear-gradient(135deg, #475569, #64748b);
+  --amber-glow: rgba(71, 85, 105, 0.16);
 
   /* Keep the terminal a dark slate panel even in light mode —
      reads like a code block on a light page. */
