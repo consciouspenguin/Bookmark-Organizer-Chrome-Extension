@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree, ExternalLink } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree, ExternalLink, Calendar } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
 import { downloadBookmarks } from '../services/bookmarks_export'
+import { calculateDateSpan } from '../utils/dates'
 
 export const DEFAULT_CATEGORIES = [
     'Work & Career',
@@ -77,6 +78,15 @@ const getStored = (key, fallback) => {
     }
 };
 
+// Second precision makes a run timestamp read like bookmark data, so it is dropped.
+const formatRunTime = (timestamp) => new Date(timestamp).toLocaleString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+});
+
 export default function Organizer() {
     const [status, setStatus] = useState('idle') // idle, processing, complete, error
     const [logs, setLogs] = useState([])
@@ -86,6 +96,7 @@ export default function Organizer() {
     const [isCancelling, setIsCancelling] = useState(false)
     const organizedResultsRef = useRef(null)
     const [lastOrganized, setLastOrganized] = useState(null)
+    const [activeDateSpan, setActiveDateSpan] = useState(null)
     const [showSchema, setShowSchema] = useState(true)
     const [showIdleSchema, setShowIdleSchema] = useState(false)
     const [copiedSchema, setCopiedSchema] = useState(false)
@@ -249,7 +260,30 @@ export default function Organizer() {
                     setDateSortOrder(result.dateSortOrder)
                     try { localStorage.setItem('dateSortOrder', result.dateSortOrder) } catch {}
                 }
-                if (result.organizedMeta) setLastOrganized(result.organizedMeta)
+                if (result.organizedMeta) {
+                    const meta = result.organizedMeta
+                    setLastOrganized(meta)
+                    const span = meta.stats?.dateSpan || meta.dateSpan
+                    if (span) {
+                        setActiveDateSpan(span)
+                    } else if (chrome.storage?.session) {
+                        chrome.storage.session.get(['organizedData'], (sRes) => {
+                            if (sRes?.organizedData && sRes.organizedData.length > 0) {
+                                const computedSpan = calculateDateSpan(sRes.organizedData)
+                                if (computedSpan) {
+                                    const updatedMeta = {
+                                        ...meta,
+                                        stats: { ...(meta.stats || {}), dateSpan: computedSpan },
+                                        dateSpan: computedSpan
+                                    }
+                                    setLastOrganized(updatedMeta)
+                                    setActiveDateSpan(computedSpan)
+                                    chrome.storage.local.set({ organizedMeta: updatedMeta })
+                                }
+                            }
+                        })
+                    }
+                }
 
                 console.log(`[Startup] Side panel ready & synced in ${(performance.now() - startTime).toFixed(1)}ms`)
             })
@@ -358,10 +392,12 @@ export default function Organizer() {
             const content = e.target.result;
             try {
                 const links = parseBookmarks(content);
+                const span = calculateDateSpan(links);
                 setUploadedFile(file);
                 setParsedBookmarks(links);
+                if (span) setActiveDateSpan(span);
                 setErrorMsg('');
-                addLog(`Loaded ${file.name} (${links.length} bookmarks found)`);
+                addLog(`Loaded ${file.name} (${links.length.toLocaleString()} bookmarks found${span ? ` · Dates ${span}` : ''})`);
             } catch (err) {
                 console.error(err);
                 setErrorMsg("Failed to parse bookmarks file.");
@@ -393,40 +429,65 @@ export default function Organizer() {
     }, [logs])
 
     const downloadOrganized = useCallback(() => {
+        const doDownload = (data) => {
+            const span = calculateDateSpan(data) || lastOrganized?.stats?.dateSpan || lastOrganized?.dateSpan || activeDateSpan;
+            addLog(`Downloading ${data.length.toLocaleString()} bookmarks${span ? ` (Dates ${span})` : ''}...`);
+            if (span && !lastOrganized?.stats?.dateSpan) {
+                const updatedMeta = {
+                    ...lastOrganized,
+                    stats: { ...(lastOrganized?.stats || {}), dateSpan: span },
+                    dateSpan: span
+                };
+                setLastOrganized(updatedMeta);
+                if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+                    chrome.storage.local.set({ organizedMeta: updatedMeta });
+                }
+            }
+            downloadBookmarks(data);
+        };
+
         if (organizedResultsRef.current) {
-            downloadBookmarks(organizedResultsRef.current)
-            return
+            doDownload(organizedResultsRef.current);
+            return;
         }
         if (typeof chrome !== 'undefined' && chrome.storage) {
             const retrieve = (data) => {
                 if (data && data.length > 0) {
-                    organizedResultsRef.current = data
-                    downloadBookmarks(data)
+                    organizedResultsRef.current = data;
+                    doDownload(data);
                 } else {
-                    setErrorMsg('No saved organized bookmarks found.')
-                    setLastOrganized(null)
+                    setErrorMsg('No saved organized bookmarks found.');
+                    setLastOrganized(null);
                 }
-            }
+            };
 
             if (chrome.storage.session) {
                 chrome.storage.session.get(['organizedData'], (res) => {
                     if (res?.organizedData && res.organizedData.length > 0) {
-                        retrieve(res.organizedData)
+                        retrieve(res.organizedData);
                     } else if (chrome.storage.local) {
                         chrome.storage.local.get(['organizedData'], (localRes) => {
-                            retrieve(localRes?.organizedData)
-                        })
+                            if (localRes?.organizedData && localRes.organizedData.length > 0) {
+                                retrieve(localRes.organizedData);
+                            } else {
+                                retrieve(null);
+                            }
+                        });
                     } else {
-                        retrieve(null)
+                        retrieve(null);
                     }
-                })
+                });
             } else if (chrome.storage.local) {
                 chrome.storage.local.get(['organizedData'], (localRes) => {
-                    retrieve(localRes?.organizedData)
-                })
+                    if (localRes?.organizedData && localRes.organizedData.length > 0) {
+                        retrieve(localRes.organizedData);
+                    } else {
+                        retrieve(null);
+                    }
+                });
             }
         }
-    }, [])
+    }, [addLog, lastOrganized, activeDateSpan])
 
     const handleCancel = useCallback(() => {
         if (organizerRef.current) {
@@ -448,8 +509,9 @@ export default function Organizer() {
         setBackgroundNotice('')
         setUploadedFile(null)
         setParsedBookmarks(null)
+        setActiveDateSpan(lastOrganized?.stats?.dateSpan || lastOrganized?.dateSpan || null)
         if (fileInputRef.current) fileInputRef.current.value = '';
-    }, [])
+    }, [lastOrganized])
 
     const startProcess = useCallback(async () => {
         const requiresApiKey = !flatDateSort || cleanTitles;
@@ -492,6 +554,9 @@ export default function Organizer() {
                 apiKey,
                 categories,
                 (data) => {
+                    if (data.dateSpan) {
+                        setActiveDateSpan(data.dateSpan);
+                    }
                     if (data.status === 'info') {
                         addLog(data.message);
                     } else if (data.status === 'processing') {
@@ -551,7 +616,20 @@ export default function Organizer() {
             if (results && results.length > 0) {
                 organizedResultsRef.current = results;
                 const stats = organizerRef.current?.stats || results.stats || null;
-                const meta = { count: results.length, savedAt: Date.now(), stats };
+                const finalSpan = stats?.dateSpan || activeDateSpan || calculateDateSpan(results);
+                const enrichedStats = {
+                    ...(stats || {}),
+                    ...(finalSpan ? { dateSpan: finalSpan } : {})
+                };
+                const meta = {
+                    count: results.length,
+                    savedAt: Date.now(),
+                    stats: enrichedStats,
+                    ...(finalSpan ? { dateSpan: finalSpan } : {})
+                };
+                if (finalSpan) {
+                    setActiveDateSpan(finalSpan);
+                }
                 setLastOrganized(meta);
                 if (typeof chrome !== 'undefined' && chrome.storage) {
                     // Save bookmark tree into memory-based session storage (RAM) so local LevelDB remains tiny (<5KB)
@@ -577,7 +655,7 @@ export default function Organizer() {
         } finally {
             setIsCancelling(false);
         }
-    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, schemaSortOrder, removeDuplicates, cleanTitles, flatDateSort, dateSortOrder]);
+    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, schemaSortOrder, removeDuplicates, cleanTitles, flatDateSort, dateSortOrder, activeDateSpan]);
 
     const canStart = (flatDateSort && !cleanTitles) || Boolean(apiKey);
 
@@ -1329,7 +1407,9 @@ export default function Organizer() {
                                 <span style={{ fontWeight: 'bold' }}>{uploadedFile.name}</span>
                             </div>
                             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                {parsedBookmarks ? `${parsedBookmarks.length} bookmarks ready` : 'Ready to process'}
+                                {parsedBookmarks
+                                    ? `${parsedBookmarks.length.toLocaleString()} bookmarks ready${activeDateSpan ? ` · Dates ${activeDateSpan}` : ''}`
+                                    : 'Ready to process'}
                             </div>
                             <button
                                 onClick={(e) => { e.stopPropagation(); resetApp(); }}
@@ -1370,10 +1450,10 @@ export default function Organizer() {
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Last run: {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
                             {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
-                            {lastOrganized.stats?.dateSpan && ` · ${lastOrganized.stats.dateSpan}`}
+                            {lastOrganized.stats?.dateSpan ? ` · Dates ${lastOrganized.stats.dateSpan}` : ' · Dates not recorded'}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
                             {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
-                            <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
+                            <span style={{ color: 'var(--text-muted)' }}> · Ran {formatRunTime(lastOrganized.savedAt)}</span>
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                             {lastOrganized.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
@@ -1401,6 +1481,7 @@ export default function Organizer() {
                             )}
                             <button
                                 onClick={downloadOrganized}
+                                title={lastOrganized.stats?.dateSpan ? `Download bookmarks (Dates ${lastOrganized.stats.dateSpan})` : 'Download bookmarks'}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -1429,6 +1510,11 @@ export default function Organizer() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                                     Category Schema ({Object.keys(lastOrganized.stats.categoryBreakdown).length} categories)
+                                    {lastOrganized.stats?.dateSpan && (
+                                        <span style={{ fontWeight: 'normal', color: 'var(--text-muted)', marginLeft: '0.4rem' }}>
+                                            · Dates {lastOrganized.stats.dateSpan}
+                                        </span>
+                                    )}
                                 </span>
                                 <button
                                     type="button"
@@ -1495,9 +1581,9 @@ export default function Organizer() {
                                 fontSize: '0.85rem',
                                 color: 'var(--text-secondary)'
                             }}>
-                                <span><strong>{lastOrganized.stats.total.toLocaleString()}</strong> {lastOrganized.stats.isFlat ? 'sorted' : 'organized'}</span>
+                                <span><strong>{(lastOrganized.stats.total ?? lastOrganized.count ?? 0).toLocaleString()}</strong> {lastOrganized.stats.isFlat ? 'sorted' : 'organized'}</span>
                                 <span>•</span>
-                                <span><strong>{lastOrganized.stats.duplicatesRemoved}</strong> duplicates</span>
+                                <span><strong>{lastOrganized.stats.duplicatesRemoved ?? 0}</strong> duplicates</span>
                                 {lastOrganized.stats.deadLinksArchived > 0 && (
                                     <>
                                         <span>•</span>
@@ -1508,31 +1594,25 @@ export default function Organizer() {
                                     <>
                                         <span>•</span>
                                         <span><strong>{lastOrganized.stats.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}</strong></span>
-                                        {lastOrganized.stats.dateSpan && (
-                                            <>
-                                                <span>•</span>
-                                                <span>{lastOrganized.stats.dateSpan}</span>
-                                            </>
-                                        )}
                                     </>
                                 ) : (
                                     <>
-                                        <span>•</span>
-                                        <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                                        {lastOrganized.stats.categoriesCount != null && (
+                                            <>
+                                                <span>•</span>
+                                                <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                                            </>
+                                        )}
                                         {lastOrganized.stats.schemaSortOrder && (
                                             <>
                                                 <span>•</span>
                                                 <span><strong>{SCHEMA_SORT_OPTIONS.find(o => o.id === lastOrganized.stats.schemaSortOrder)?.label || 'A–Z'}</strong></span>
                                             </>
                                         )}
-                                        {lastOrganized.stats.dateSpan && (
-                                            <>
-                                                <span>•</span>
-                                                <span>{lastOrganized.stats.dateSpan}</span>
-                                            </>
-                                        )}
                                     </>
                                 )}
+                                <span>•</span>
+                                <span>{lastOrganized.stats.dateSpan ? `Dates ${lastOrganized.stats.dateSpan}` : 'Dates not recorded'}</span>
                             </div>
                         )}
                         {lastOrganized?.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (
@@ -1621,15 +1701,21 @@ export default function Organizer() {
                             </div>
                         )}
                         {lastOrganized && (
-                            <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4rem' }}>
                                 <button
                                     className="btn-primary"
                                     onClick={downloadOrganized}
+                                    title={lastOrganized.stats?.dateSpan ? `Download bookmarks (Dates ${lastOrganized.stats.dateSpan})` : 'Download bookmarks'}
                                     style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
                                 >
                                     <Download size={18} />
                                     {lastOrganized.stats?.isFlat ? 'Download Chronological Bookmarks' : 'Download Organized Bookmarks'}
                                 </button>
+                                {lastOrganized.stats?.dateSpan && (
+                                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                        Date range: <strong>{lastOrganized.stats.dateSpan}</strong>
+                                    </div>
+                                )}
                             </div>
                         )}
                         <div
@@ -1649,44 +1735,62 @@ export default function Organizer() {
                         </div>
                     </div>
                 ) : status === 'processing' ? (
-                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <button
-                            className="btn-primary btn-in-progress"
-                            disabled
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                cursor: 'wait'
-                            }}
-                        >
-                            <Loader2 size={18} className="spin-icon" />
-                            <span>In Progress... {progress}%</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleCancel}
-                            disabled={isCancelling}
-                            title="Cancel the organization process"
-                            style={{
-                                display: 'flex',
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', width: '100%' }}>
+                        {activeDateSpan && (
+                            <div style={{
+                                display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '0.4rem',
-                                padding: '0.8rem 1.25rem',
-                                borderRadius: '10px',
-                                border: '1px solid var(--error)',
-                                background: 'var(--error-soft)',
-                                color: 'var(--error)',
-                                fontWeight: '600',
-                                fontSize: '0.95rem',
-                                cursor: isCancelling ? 'not-allowed' : 'pointer',
-                                opacity: isCancelling ? 0.6 : 1,
-                                transition: 'all 0.2s ease'
-                            }}
-                        >
-                            <Square size={16} fill="currentColor" />
-                            {isCancelling ? 'Cancelling...' : 'Cancel'}
-                        </button>
+                                padding: '0.35rem 0.8rem',
+                                borderRadius: '20px',
+                                background: 'var(--surface-alt)',
+                                border: '1px solid var(--border)',
+                                fontSize: '0.8rem',
+                                color: 'var(--text-secondary)'
+                            }}>
+                                <Calendar size={13} style={{ color: 'var(--accent)' }} />
+                                <span>Date range: <strong>{activeDateSpan}</strong></span>
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+                            <button
+                                className="btn-primary btn-in-progress"
+                                disabled
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    cursor: 'wait'
+                                }}
+                            >
+                                <Loader2 size={18} className="spin-icon" />
+                                <span>In Progress... {progress}%</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCancel}
+                                disabled={isCancelling}
+                                title="Cancel the organization process"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.4rem',
+                                    padding: '0.8rem 1.25rem',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--error)',
+                                    background: 'var(--error-soft)',
+                                    color: 'var(--error)',
+                                    fontWeight: '600',
+                                    fontSize: '0.95rem',
+                                    cursor: isCancelling ? 'not-allowed' : 'pointer',
+                                    opacity: isCancelling ? 0.6 : 1,
+                                    transition: 'all 0.2s ease'
+                                }}
+                            >
+                                <Square size={16} fill="currentColor" />
+                                {isCancelling ? 'Cancelling...' : 'Cancel'}
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <button
