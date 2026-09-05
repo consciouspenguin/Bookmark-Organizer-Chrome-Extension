@@ -36,10 +36,10 @@ Turn years of messy, unsorted bookmarks into a clean, browsable folder structure
 
 You can install this extension manually (no Store required) by downloading the latest release.
 
-**➡️ [Download the latest release (v1.2.0)](https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension/releases/latest)** — or grab the zip directly: **[bookmark-organizer-extension.zip](https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension/releases/download/v1.2.0/bookmark-organizer-extension.zip)**
+**➡️ [Download the latest release (v1.2.0)](https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension/releases/latest)** — or grab the zip directly: **[bookmark-organizer-extension.zip](https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension/releases/download/v1.2.0/bookmark-organizer-extension.zip)**
 
 ### Method 1: Download & Install (Easiest)
-1. **Download**: Grab **[bookmark-organizer-extension.zip](https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension/releases/download/v1.2.0/bookmark-organizer-extension.zip)** from the [Releases page](https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension/releases/latest).
+1. **Download**: Grab **[bookmark-organizer-extension.zip](https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension/releases/download/v1.2.0/bookmark-organizer-extension.zip)** from the [Releases page](https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension/releases/latest).
 2. **Unzip**: Extract the zip file to a folder on your computer.
 3. **Open Chrome Extensions**:
    - Type `chrome://extensions` in your address bar.
@@ -54,7 +54,7 @@ You can install this extension manually (no Store required) by downloading the l
 ### Method 2: Build from Source
 If you are a developer and want to modify the code:
 ```bash
-git clone https://github.com/n1ecC/Bookmark-Organizer-Chrome-Extension.git
+git clone https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension.git
 cd Bookmark-Organizer-Chrome-Extension/frontend
 npm install
 npm run build
