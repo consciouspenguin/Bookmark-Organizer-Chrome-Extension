@@ -242,7 +242,7 @@ describe('Last run banner date reporting', () => {
         delete global.chrome
     })
 
-    it('puts the run time after "Last run:" and trails the unlabeled bookmark range', () => {
+    it('opens with the bare run time and trails the unlabeled bookmark range', () => {
         const text = bannerText({
             total: 3462,
             isFlat: false,
@@ -253,7 +253,8 @@ describe('Last run banner date reporting', () => {
             dateSpan: '7/14/2017 – 11/14/2023'
         })
 
-        expect(text).toContain(`Last run: ${runTime} · 3,462 bookmarks organized · 7/14/2017 – 11/14/2023`)
+        expect(text).toContain(`${runTime} · 3,462 bookmarks organized · 7/14/2017 – 11/14/2023`)
+        expect(text).not.toContain('Last run')
         expect(text).not.toContain('Dates')
         expect(text).not.toContain('Ran')
         expect(text).not.toContain('6:13:43')
@@ -284,7 +285,7 @@ describe('Last run banner date reporting', () => {
         })
 
         expect(text).toContain('dates not recorded')
-        expect(text).toContain(`Last run: ${runTime}`)
+        expect(text.trimStart().startsWith(runTime)).toBe(true)
     })
 
     it('displays date span in the idle schema drawer header when expanded', async () => {

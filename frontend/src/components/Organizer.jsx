@@ -1465,7 +1465,7 @@ export default function Organizer() {
                 <div className="last-run-banner section-block">
                     <div className="last-run-header">
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            Last run: <span style={{ color: 'var(--text-muted)' }}>{formatRunTime(lastOrganized.savedAt)}</span> · {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
+                            <span style={{ color: 'var(--text-muted)' }}>{formatRunTime(lastOrganized.savedAt)}</span> · {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
                             {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
                             {lastOrganized.stats?.dateSpan ? ` · ${formatDateSpan(lastOrganized.stats.dateSpan)}` : ' · dates not recorded'}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
