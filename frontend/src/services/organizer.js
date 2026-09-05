@@ -100,18 +100,38 @@ export function getBookmarkTimestamp(bookmark) {
     return 0;
 }
 
+// Normalizes and extracts hostname/domain from bookmark URL
+export function getBookmarkDomain(bookmark) {
+    if (!bookmark || !bookmark.url) return '';
+    try {
+        const hostname = new URL(bookmark.url).hostname.toLowerCase();
+        return hostname.replace(/^www\./, '');
+    } catch {
+        return '';
+    }
+}
+
 export class OrganizerService {
-    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false, flatDateSort = false, dateSortOrder = "desc") {
+    constructor(apiKey, categories, onProgress, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", sortAlphabetically = true, removeDuplicates = true, cleanTitles = false, flatDateSort = false, dateSortOrder = "desc", schemaSortOrder = undefined) {
         this.apiKey = apiKey;
         this.categories = categories;
         this.onProgress = onProgress || (() => { });
         this.model = model;
         this.subfolderTarget = subfolderTarget;
-        this.sortAlphabetically = sortAlphabetically;
         this.removeDuplicates = removeDuplicates;
         this.cleanTitles = cleanTitles;
         this.flatDateSort = flatDateSort;
         this.dateSortOrder = dateSortOrder; // 'desc' (newest first) or 'asc' (oldest first)
+
+        // schemaSortOrder can be 'alpha', 'date-desc', 'date-asc', 'domain', 'alpha-desc', or 'none'
+        if (schemaSortOrder !== undefined) {
+            this.schemaSortOrder = schemaSortOrder;
+            this.sortAlphabetically = schemaSortOrder === 'alpha';
+        } else {
+            this.sortAlphabetically = sortAlphabetically;
+            this.schemaSortOrder = sortAlphabetically ? 'alpha' : 'none';
+        }
+
         this.batchSize = 50;
         this.isCancelled = false;
         this.stats = {
@@ -121,7 +141,8 @@ export class OrganizerService {
             categoriesCount: 0,
             categoryBreakdown: {},
             isFlat: flatDateSort,
-            dateSortOrder
+            dateSortOrder,
+            schemaSortOrder: this.schemaSortOrder
         };
     }
 
@@ -513,13 +534,62 @@ export class OrganizerService {
         const finalResults = [...classifiedActive, ...deadLinks];
 
         // Creation order determines display order in Chrome, so sorting the
-        // results here alphabetizes the folders and the bookmarks within them.
-        if (this.sortAlphabetically) {
-            finalResults.sort((a, b) =>
-                (a.category || '').localeCompare(b.category || '') ||
-                (a.sub_category || '').localeCompare(b.sub_category || '') ||
-                (a.title || '').localeCompare(b.title || '')
-            );
+        // results here controls the order of folders and bookmarks within them.
+        if (this.schemaSortOrder && this.schemaSortOrder !== 'none') {
+            const sortLabels = {
+                'alpha': 'Alphabetical (A–Z)',
+                'date-desc': 'Date Added (Newest First)',
+                'date-asc': 'Date Added (Oldest First)',
+                'domain': 'Website / Domain (A–Z)',
+                'alpha-desc': 'Reverse Alphabetical (Z–A)'
+            };
+            const sortLabel = sortLabels[this.schemaSortOrder] || this.schemaSortOrder;
+            this.onProgress({
+                status: 'info',
+                message: `Sorting folder contents (${sortLabel})...`
+            });
+
+            finalResults.sort((a, b) => {
+                // Keep categories and sub-categories grouped and alphabetized
+                const catDiff = (a.category || '').localeCompare(b.category || '');
+                if (catDiff !== 0) return catDiff;
+                const subDiff = (a.sub_category || '').localeCompare(b.sub_category || '');
+                if (subDiff !== 0) return subDiff;
+
+                // Sort bookmarks within each folder according to chosen schema
+                switch (this.schemaSortOrder) {
+                    case 'date-desc': {
+                        const timeA = getBookmarkTimestamp(a);
+                        const timeB = getBookmarkTimestamp(b);
+                        if (timeA !== timeB) {
+                            return timeB - timeA;
+                        }
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'date-asc': {
+                        const timeA = getBookmarkTimestamp(a);
+                        const timeB = getBookmarkTimestamp(b);
+                        if (timeA !== timeB) {
+                            return timeA - timeB;
+                        }
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'domain': {
+                        const domainA = getBookmarkDomain(a);
+                        const domainB = getBookmarkDomain(b);
+                        const domainDiff = domainA.localeCompare(domainB);
+                        if (domainDiff !== 0) return domainDiff;
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                    case 'alpha-desc': {
+                        return (b.title || '').localeCompare(a.title || '');
+                    }
+                    case 'alpha':
+                    default: {
+                        return (a.title || '').localeCompare(b.title || '');
+                    }
+                }
+            });
         }
 
         if (this.isCancelled) {
@@ -602,7 +672,9 @@ export class OrganizerService {
             duplicatesRemoved,
             deadLinksArchived: deadLinks.length,
             categoriesCount: Object.keys(categoryBreakdown).length,
-            categoryBreakdown
+            categoryBreakdown,
+            isFlat: false,
+            schemaSortOrder: this.schemaSortOrder
         };
         finalResults.stats = this.stats;
 

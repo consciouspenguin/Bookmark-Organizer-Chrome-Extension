@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain } from './organizer'
 import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
-import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES } from '../components/Organizer'
+import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES, SCHEMA_SORT_OPTIONS } from '../components/Organizer'
 
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
@@ -1092,6 +1092,214 @@ describe('Category Presets and Suggestions', () => {
         for (const sug of SUGGESTED_ADDABLE_CATEGORIES) {
             expect(DEFAULT_CATEGORIES).not.toContain(sug)
         }
+    })
+})
+
+describe('getBookmarkDomain', () => {
+    it('extracts clean domain without leading www', () => {
+        expect(getBookmarkDomain({ url: 'https://www.github.com/repo' })).toBe('github.com')
+        expect(getBookmarkDomain({ url: 'http://www.google.com' })).toBe('google.com')
+    })
+
+    it('preserves subdomains other than www', () => {
+        expect(getBookmarkDomain({ url: 'https://developer.mozilla.org/en-US/' })).toBe('developer.mozilla.org')
+        expect(getBookmarkDomain({ url: 'https://api.v2.service.co.uk/test' })).toBe('api.v2.service.co.uk')
+    })
+
+    it('safely handles missing or malformed URLs', () => {
+        expect(getBookmarkDomain(null)).toBe('')
+        expect(getBookmarkDomain({})).toBe('')
+        expect(getBookmarkDomain({ url: 'not-a-valid-url' })).toBe('')
+    })
+})
+
+describe('SCHEMA_SORT_OPTIONS Configuration', () => {
+    it('defines all 5 sorting strategies with valid metadata and icons', () => {
+        expect(SCHEMA_SORT_OPTIONS).toHaveLength(5)
+        const ids = SCHEMA_SORT_OPTIONS.map(o => o.id)
+        expect(ids).toEqual(['alpha', 'date-desc', 'date-asc', 'domain', 'alpha-desc'])
+        for (const option of SCHEMA_SORT_OPTIONS) {
+            expect(option.label).toBeTruthy()
+            expect(option.badge).toBeTruthy()
+            expect(option.desc).toBeTruthy()
+            expect(option.icon).toBeDefined()
+        }
+    })
+})
+
+describe('Schema Folder Content Sorting (schemaSortOrder)', () => {
+    let classifySpy
+    let schemaSpy
+
+    beforeEach(() => {
+        schemaSpy = vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [
+                { name: 'Tech', sub_categories: [] },
+                { name: 'Design', sub_categories: [] }
+            ]
+        })
+
+        classifySpy = vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
+            return batch.map(b => ({
+                ...b,
+                category: b.url.includes('design') ? 'Design' : 'Tech',
+                sub_category: null
+            }))
+        })
+
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+        vi.restoreAllMocks()
+    })
+
+    it('sorts bookmarks inside folders by Date Added (Newest First) when schemaSortOrder is date-desc', async () => {
+        const bookmarks = [
+            { title: 'Older Tech', url: 'https://tech.com/old', add_date: '1500000000' },
+            { title: 'Newer Tech', url: 'https://tech.com/new', add_date: '1700000000' },
+            { title: 'Oldest Design', url: 'https://design.com/oldest', add_date: '1400000000' },
+            { title: 'Newest Design', url: 'https://design.com/newest', add_date: '1800000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech', 'Design'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false, // sortAlphabetically
+            true, // removeDuplicates
+            false, // cleanTitles
+            false, // flatDateSort
+            'desc',
+            'date-desc' // schemaSortOrder
+        )
+
+        const results = await service.start(bookmarks)
+
+        // Categories remain ordered A-Z (Design before Tech)
+        // Inside Design: Newest Design (1800000000) then Oldest Design (1400000000)
+        // Inside Tech: Newer Tech (1700000000) then Older Tech (1500000000)
+        expect(results.map(b => b.title)).toEqual([
+            'Newest Design',
+            'Oldest Design',
+            'Newer Tech',
+            'Older Tech'
+        ])
+        expect(service.stats.schemaSortOrder).toBe('date-desc')
+        expect(service.stats.isFlat).toBe(false)
+    })
+
+    it('sorts bookmarks inside folders by Date Added (Oldest First) when schemaSortOrder is date-asc', async () => {
+        const bookmarks = [
+            { title: 'Newer Tech', url: 'https://tech.com/new', add_date: '1700000000' },
+            { title: 'Older Tech', url: 'https://tech.com/old', add_date: '1500000000' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false,
+            true,
+            false,
+            false,
+            'desc',
+            'date-asc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Older Tech', 'Newer Tech'])
+        expect(service.stats.schemaSortOrder).toBe('date-asc')
+    })
+
+    it('sorts bookmarks inside folders by Website Domain A-Z when schemaSortOrder is domain', async () => {
+        const bookmarks = [
+            { title: 'YouTube Video', url: 'https://www.youtube.com/watch?v=123' },
+            { title: 'GitHub Repo B', url: 'https://github.com/repo-b' },
+            { title: 'GitHub Repo A', url: 'https://github.com/repo-a' },
+            { title: 'ArXiv Paper', url: 'https://arxiv.org/abs/1234' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false,
+            true,
+            false,
+            false,
+            'desc',
+            'domain'
+        )
+
+        const results = await service.start(bookmarks)
+        // Domains: arxiv.org -> github.com -> youtube.com
+        // Within github.com: tie-breaks by title A-Z
+        expect(results.map(b => b.title)).toEqual([
+            'ArXiv Paper',
+            'GitHub Repo A',
+            'GitHub Repo B',
+            'YouTube Video'
+        ])
+        expect(service.stats.schemaSortOrder).toBe('domain')
+    })
+
+    it('sorts bookmarks inside folders reverse alphabetically when schemaSortOrder is alpha-desc', async () => {
+        const bookmarks = [
+            { title: 'Alpha Tech', url: 'https://tech.com/alpha' },
+            { title: 'Zeta Tech', url: 'https://tech.com/zeta' },
+            { title: 'Beta Tech', url: 'https://tech.com/beta' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false,
+            true,
+            false,
+            false,
+            'desc',
+            'alpha-desc'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Zeta Tech', 'Beta Tech', 'Alpha Tech'])
+        expect(service.stats.schemaSortOrder).toBe('alpha-desc')
+    })
+
+    it('sorts bookmarks inside folders alphabetically when schemaSortOrder is alpha', async () => {
+        const bookmarks = [
+            { title: 'Zeta Tech', url: 'https://tech.com/zeta' },
+            { title: 'Alpha Tech', url: 'https://tech.com/alpha' },
+            { title: 'Beta Tech', url: 'https://tech.com/beta' }
+        ]
+
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            false,
+            'desc',
+            'alpha'
+        )
+
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Alpha Tech', 'Beta Tech', 'Zeta Tech'])
+        expect(service.stats.schemaSortOrder).toBe('alpha')
     })
 })
 

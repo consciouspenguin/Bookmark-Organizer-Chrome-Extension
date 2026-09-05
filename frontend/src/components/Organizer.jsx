@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp } from 'lucide-react'
+import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree } from 'lucide-react'
 import { OrganizerService } from '../services/organizer'
 import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
@@ -27,6 +27,44 @@ export const SUGGESTED_ADDABLE_CATEGORIES = [
     'Podcasts, Audio & Music',
     'Gaming & Esports',
     'Legal, Docs & Admin'
+];
+
+export const SCHEMA_SORT_OPTIONS = [
+    {
+        id: 'alpha',
+        label: 'Alphabetical (A–Z)',
+        badge: 'Default',
+        icon: ArrowDownAZ,
+        desc: 'Folders and bookmarks sorted alphabetically by title A to Z.'
+    },
+    {
+        id: 'date-desc',
+        label: 'Date Added (Newest First)',
+        badge: 'Recent',
+        icon: ArrowDown,
+        desc: 'Folders sorted A–Z; newest bookmarks at the top of each folder.'
+    },
+    {
+        id: 'date-asc',
+        label: 'Date Added (Oldest First)',
+        badge: 'Archive',
+        icon: ArrowUp,
+        desc: 'Folders sorted A–Z; earliest saved bookmarks at the top of each folder.'
+    },
+    {
+        id: 'domain',
+        label: 'By Website / Domain (A–Z)',
+        badge: 'Grouped',
+        icon: Globe,
+        desc: 'Groups bookmarks by domain (e.g. github.com, youtube.com), then title.'
+    },
+    {
+        id: 'alpha-desc',
+        label: 'Reverse Alphabetical (Z–A)',
+        badge: 'Z → A',
+        icon: ArrowUpAZ,
+        desc: 'Folders and bookmarks sorted in reverse alphabetical order Z to A.'
+    }
 ];
 
 export default function Organizer() {
@@ -100,8 +138,9 @@ export default function Organizer() {
         [categories]
     )
 
-    // Alphabetical Sorting toggle — controls folder and bookmark sorting inside folders
-    const [sortAlphabetically, setSortAlphabetically] = useState(true)
+    // Folder Content Sorting inside schema folders (alpha, date-desc, date-asc, domain, alpha-desc)
+    const [schemaSortOrder, setSchemaSortOrder] = useState('alpha')
+    const sortAlphabetically = schemaSortOrder === 'alpha'
 
     // Keep only one copy of each exact URL in the organized output.
     const [removeDuplicates, setRemoveDuplicates] = useState(true)
@@ -128,7 +167,7 @@ export default function Organizer() {
     // Load Settings from storage
     useEffect(() => {
         if (typeof chrome !== 'undefined' && chrome.storage) {
-            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'removeDuplicates', 'cleanTitles', 'flatDateSort', 'dateSortOrder', 'organizedMeta'], (result) => {
+            chrome.storage.local.get(['apiKey', 'categories', 'selectedModel', 'subfolderTarget', 'sortAlphabetically', 'schemaSortOrder', 'removeDuplicates', 'cleanTitles', 'flatDateSort', 'dateSortOrder', 'organizedMeta'], (result) => {
                 if (result.apiKey) setApiKey(result.apiKey)
                 if (result.categories && Array.isArray(result.categories) && result.categories.length > 0) {
                     setCategories(result.categories)
@@ -142,7 +181,11 @@ export default function Organizer() {
                     setSelectedModel('google/gemini-3.1-flash-lite')
                 }
                 if (result.subfolderTarget) setSubfolderTarget(result.subfolderTarget)
-                if (typeof result.sortAlphabetically === 'boolean') setSortAlphabetically(result.sortAlphabetically)
+                if (result.schemaSortOrder && SCHEMA_SORT_OPTIONS.some(opt => opt.id === result.schemaSortOrder)) {
+                    setSchemaSortOrder(result.schemaSortOrder)
+                } else if (typeof result.sortAlphabetically === 'boolean') {
+                    setSchemaSortOrder(result.sortAlphabetically ? 'alpha' : 'date-desc')
+                }
                 if (typeof result.removeDuplicates === 'boolean') setRemoveDuplicates(result.removeDuplicates)
                 if (result.cleanTitles !== undefined) setCleanTitles(Boolean(result.cleanTitles))
                 if (typeof result.flatDateSort === 'boolean') setFlatDateSort(result.flatDateSort)
@@ -177,10 +220,16 @@ export default function Organizer() {
         updateSetting('subfolderTarget', target)
     }, [updateSetting])
 
-    const handleSortToggle = useCallback((enabled) => {
-        setSortAlphabetically(enabled)
-        updateSetting('sortAlphabetically', enabled)
+    const handleSchemaSortChange = useCallback((newOrder) => {
+        setSchemaSortOrder(newOrder)
+        updateSetting('schemaSortOrder', newOrder)
+        updateSetting('sortAlphabetically', newOrder === 'alpha')
     }, [updateSetting])
+
+    const handleSortToggle = useCallback((enabled) => {
+        const newOrder = enabled ? 'alpha' : 'date-desc'
+        handleSchemaSortChange(newOrder)
+    }, [handleSchemaSortChange])
 
     const handleRemoveDuplicatesToggle = useCallback((enabled) => {
         setRemoveDuplicates(enabled)
@@ -363,11 +412,12 @@ export default function Organizer() {
             } else {
                 const selectedModelLabel = models.find(m => m.id === selectedModel)?.label || selectedModel;
                 const subfolderLabel = subfolderOptions.find(opt => opt.id === subfolderTarget)?.label || subfolderTarget;
+                const sortLabel = SCHEMA_SORT_OPTIONS.find(opt => opt.id === schemaSortOrder)?.label || 'Alphabetical (A–Z)';
                 setLogs([
                     { message: 'Starting AI Organization...', timestamp: new Date() },
                     { message: `Using Model: Google Gemini ${selectedModelLabel}`, timestamp: new Date() },
                     { message: `Subfolder Organization: ${subfolderLabel}`, timestamp: new Date() },
-                    { message: `Alphabetical Sorting: ${sortAlphabetically ? 'On' : 'Off'}`, timestamp: new Date() },
+                    { message: `Folder Content Sorting: ${sortLabel}`, timestamp: new Date() },
                     { message: `Remove Duplicate URLs: ${removeDuplicates ? 'On' : 'Off'}`, timestamp: new Date() },
                     { message: `Clean Bookmark Titles: ${cleanTitles ? 'On' : 'Off'}`, timestamp: new Date() }
                 ]);
@@ -415,7 +465,8 @@ export default function Organizer() {
                 removeDuplicates,
                 cleanTitles,
                 flatDateSort,
-                dateSortOrder
+                dateSortOrder,
+                schemaSortOrder
             );
 
             // Pass parsed bookmarks if file mode, otherwise null (browser mode)
@@ -456,7 +507,7 @@ export default function Organizer() {
         } finally {
             setIsCancelling(false);
         }
-    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, removeDuplicates, cleanTitles, flatDateSort, dateSortOrder]);
+    }, [apiKey, models, selectedModel, categories, addLog, parsedBookmarks, subfolderTarget, subfolderOptions, sortAlphabetically, schemaSortOrder, removeDuplicates, cleanTitles, flatDateSort, dateSortOrder]);
 
     const canStart = (flatDateSort && !cleanTitles) || Boolean(apiKey);
 
@@ -783,45 +834,108 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Alphabetical Sorting Toggle */}
+            {/* Folder Content Sorting (Schema-Dependent Mode) */}
             {status === 'idle' && !flatDateSort && (
-                <div style={{ marginBottom: '2rem', padding: '1.5rem', background: 'var(--surface-alt)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
-                    <div>
-                        <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: '500' }}>
-                            Sort Alphabetically
-                        </label>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                            Sort folders and the bookmarks inside them A–Z
+                <div style={{
+                    marginBottom: '2rem',
+                    padding: '1.5rem',
+                    background: 'var(--surface-alt)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border)'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <FolderTree size={18} style={{ color: 'var(--accent)' }} />
+                            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '600' }}>
+                                Folder Content Sorting
+                            </label>
                         </div>
-                    </div>
-                    <button
-                        role="switch"
-                        aria-checked={sortAlphabetically}
-                        onClick={() => handleSortToggle(!sortAlphabetically)}
-                        style={{
-                            width: '44px',
-                            height: '24px',
-                            borderRadius: '12px',
-                            border: '1px solid var(--border)',
-                            background: sortAlphabetically ? 'var(--accent)' : 'var(--surface-solid)',
-                            position: 'relative',
-                            cursor: 'pointer',
-                            padding: 0,
-                            flexShrink: 0,
-                            transition: 'background 0.2s ease'
-                        }}
-                    >
                         <span style={{
-                            position: 'absolute',
-                            top: '2px',
-                            left: sortAlphabetically ? '22px' : '2px',
-                            width: '18px',
-                            height: '18px',
-                            borderRadius: '50%',
-                            background: sortAlphabetically ? 'var(--on-accent)' : 'var(--text-muted)',
-                            transition: 'left 0.2s ease'
-                        }} />
-                    </button>
+                            fontSize: '0.72rem',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '10px',
+                            background: 'var(--surface-solid)',
+                            border: '1px solid var(--border)',
+                            color: 'var(--accent)',
+                            fontWeight: 600
+                        }}>
+                            {SCHEMA_SORT_OPTIONS.find(opt => opt.id === schemaSortOrder)?.badge || 'Active'}
+                        </span>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: '1.4' }}>
+                        Choose how bookmarks are ordered inside each AI-generated category folder:
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        {SCHEMA_SORT_OPTIONS.map(option => {
+                            const isSelected = schemaSortOrder === option.id;
+                            const IconComponent = option.icon;
+                            return (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    onClick={() => handleSchemaSortChange(option.id)}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '0.75rem 1rem',
+                                        borderRadius: '8px',
+                                        border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+                                        background: isSelected ? 'var(--surface-solid)' : 'transparent',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        textAlign: 'left',
+                                        transition: 'all 0.2s ease',
+                                        boxShadow: isSelected ? '0 2px 10px var(--accent-glow)' : 'none'
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                        <div style={{
+                                            width: '32px',
+                                            height: '32px',
+                                            borderRadius: '8px',
+                                            background: isSelected ? 'var(--accent-soft)' : 'var(--surface-solid)',
+                                            color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            border: '1px solid var(--border)'
+                                        }}>
+                                            <IconComponent size={16} />
+                                        </div>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <span style={{ fontSize: '0.86rem', fontWeight: isSelected ? '600' : '500' }}>
+                                                    {option.label}
+                                                </span>
+                                            </div>
+                                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                                                {option.desc}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {isSelected && (
+                                        <div style={{
+                                            width: '20px',
+                                            height: '20px',
+                                            borderRadius: '50%',
+                                            background: 'var(--accent)',
+                                            color: 'var(--on-accent)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                            marginLeft: '0.5rem'
+                                        }}>
+                                            <Check size={12} strokeWidth={3} />
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             )}
 
@@ -1375,6 +1489,12 @@ export default function Organizer() {
                                     <>
                                         <span>•</span>
                                         <span><strong>{lastOrganized.stats.categoriesCount}</strong> categories</span>
+                                        {lastOrganized.stats.schemaSortOrder && (
+                                            <>
+                                                <span>•</span>
+                                                <span><strong>{SCHEMA_SORT_OPTIONS.find(o => o.id === lastOrganized.stats.schemaSortOrder)?.label || 'A–Z'}</strong></span>
+                                            </>
+                                        )}
                                     </>
                                 )}
                             </div>
