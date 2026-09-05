@@ -464,4 +464,55 @@ describe('In-process and completion date range display', () => {
             expect(screen.getByRole('button', { name: /Download Organized Bookmarks/i }).getAttribute('title')).toContain('Dates 1/1/2021')
         })
     })
+
+    it('shows the compact sort label and an oldest-to-newest range in the completion stats pill', async () => {
+        localStorage.setItem('apiKey', 'sk-or-test-12345')
+
+        OrganizerService.mockImplementation(function (apiKey, categories, onProgress) {
+            this.start = vi.fn(async () => {
+                act(() => {
+                    onProgress({ status: 'done', message: 'Complete!' })
+                })
+                const results = [{ title: 'Item 1', url: 'https://example.com/1', dateAdded: 1788489600000 }]
+                results.stats = {
+                    total: 3462,
+                    isFlat: false,
+                    duplicatesRemoved: 0,
+                    deadLinksArchived: 0,
+                    categoriesCount: 9,
+                    schemaSortOrder: 'alpha',
+                    categoryBreakdown: {},
+                    dateSpan: '9/3/2026 – 9/3/2026'
+                }
+                return results
+            })
+            this.cancel = vi.fn()
+            this.isCancelled = false
+        })
+
+        global.chrome = {
+            storage: {
+                local: {
+                    get: vi.fn((keys, cb) => cb({})),
+                    set: vi.fn(),
+                    remove: vi.fn()
+                },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+
+        const { container } = render(<Organizer />)
+
+        act(() => {
+            fireEvent.click(screen.getByRole('button', { name: /Organize My Bookmarks/i }))
+        })
+
+        await waitFor(() => {
+            const pill = container.querySelector('.stats-pill')
+            expect(pill).not.toBeNull()
+            expect(pill.textContent).toContain('A–Z')
+            expect(pill.textContent).toContain('Dates 9/3/2026 – 9/3/2026')
+            expect(pill.textContent).not.toContain('Alphabetical')
+        })
+    })
 })

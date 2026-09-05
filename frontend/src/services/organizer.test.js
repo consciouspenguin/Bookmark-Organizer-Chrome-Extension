@@ -1470,14 +1470,14 @@ describe('calculateDateSpan', () => {
         expect(calculateDateSpan([{ title: 'Zero Date', url: 'https://example.com', add_date: '0' }])).toBeNull()
     })
 
-    it('returns a single formatted date when all bookmarks share the same day', () => {
+    it('keeps the oldest-to-newest range format when all bookmarks share the same day', () => {
         // 1609459200 = 2021-01-01T00:00:00.000Z
         const singleDayBookmarks = [
             { title: 'Morning', url: 'https://a.com', add_date: '1609459200' },
             { title: 'Noon', url: 'https://b.com', add_date: '1609470000' }
         ]
         const expectedDate = new Date(1609459200000).toLocaleDateString()
-        expect(calculateDateSpan(singleDayBookmarks)).toBe(expectedDate)
+        expect(calculateDateSpan(singleDayBookmarks)).toBe(`${expectedDate} – ${expectedDate}`)
     })
 
     it('returns formatted oldest to newest range matching the oldest and newest bookmarks', () => {

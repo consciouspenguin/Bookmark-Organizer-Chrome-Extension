@@ -31,6 +31,7 @@ export const SCHEMA_SORT_OPTIONS = [
     {
         id: 'alpha',
         label: 'Alphabetical (A–Z)',
+        short: 'A–Z',
         badge: 'Default',
         icon: ArrowDownAZ,
         desc: 'Folders and bookmarks sorted alphabetically by title A to Z.'
@@ -38,6 +39,7 @@ export const SCHEMA_SORT_OPTIONS = [
     {
         id: 'date-desc',
         label: 'Date Added (Newest First)',
+        short: 'Newest first',
         badge: 'Recent',
         icon: ArrowDown,
         desc: 'Folders sorted A–Z; newest bookmarks at the top of each folder.'
@@ -45,6 +47,7 @@ export const SCHEMA_SORT_OPTIONS = [
     {
         id: 'date-asc',
         label: 'Date Added (Oldest First)',
+        short: 'Oldest first',
         badge: 'Archive',
         icon: ArrowUp,
         desc: 'Folders sorted A–Z; earliest saved bookmarks at the top of each folder.'
@@ -52,6 +55,7 @@ export const SCHEMA_SORT_OPTIONS = [
     {
         id: 'domain',
         label: 'By Website / Domain (A–Z)',
+        short: 'Domain A–Z',
         badge: 'Grouped',
         icon: Globe,
         desc: 'Groups bookmarks by domain (e.g. github.com, youtube.com), then title.'
@@ -59,6 +63,7 @@ export const SCHEMA_SORT_OPTIONS = [
     {
         id: 'alpha-desc',
         label: 'Reverse Alphabetical (Z–A)',
+        short: 'Z–A',
         badge: 'Z → A',
         icon: ArrowUpAZ,
         desc: 'Folders and bookmarks sorted in reverse alphabetical order Z to A.'
@@ -1576,7 +1581,7 @@ export default function Organizer() {
                                 : (flatDateSort ? 'All Done! Check your "Chronological Bookmarks" folder.' : 'All Done! Check your "AI Organized Bookmarks" folder.')}
                         </div>
                         {lastOrganized?.stats && (
-                            <div style={{
+                            <div className="stats-pill" style={{
                                 display: 'inline-flex',
                                 flexWrap: 'wrap',
                                 alignItems: 'center',
@@ -1615,7 +1620,7 @@ export default function Organizer() {
                                         {lastOrganized.stats.schemaSortOrder && (
                                             <>
                                                 <span>•</span>
-                                                <span><strong>{SCHEMA_SORT_OPTIONS.find(o => o.id === lastOrganized.stats.schemaSortOrder)?.label || 'A–Z'}</strong></span>
+                                                <span><strong>{SCHEMA_SORT_OPTIONS.find(o => o.id === lastOrganized.stats.schemaSortOrder)?.short || 'A–Z'}</strong></span>
                                             </>
                                         )}
                                     </>
