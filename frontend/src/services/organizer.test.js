@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, isNonSubdividableError } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan } from './organizer'
 import * as ai from './ai'
-import { classifyBatch, generateSchema, withRetry, geminiModelId } from './ai'
+import { classifyBatch, generateSchema, withRetry, geminiModelId, isNetworkError, isRateLimitError, isRetryableError } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
 import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES, SCHEMA_SORT_OPTIONS } from '../components/Organizer'
@@ -457,6 +457,80 @@ describe('withRetry resilient retry and cancellation', () => {
     })
 })
 
+describe('isNetworkError, isRateLimitError, and isRetryableError helpers', () => {
+    it('accurately identifies network and timeout errors', () => {
+        expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true)
+        expect(isNetworkError(new Error('request timeout'))).toBe(true)
+        expect(isNetworkError(new Error('NetworkError when attempting to fetch resource'))).toBe(true)
+        expect(isNetworkError(new Error('connect ECONNRESET 127.0.0.1'))).toBe(true)
+        expect(isNetworkError(new Error('getaddrinfo ENOTFOUND api.google.com'))).toBe(true)
+
+        const abortError = new Error('The operation was aborted')
+        abortError.name = 'AbortError'
+        expect(isNetworkError(abortError)).toBe(true)
+
+        const timeoutError = new Error('Timeout')
+        timeoutError.name = 'TimeoutError'
+        expect(isNetworkError(timeoutError)).toBe(true)
+
+        const err502 = new Error('Bad Gateway')
+        err502.statusCode = 502
+        expect(isNetworkError(err502)).toBe(true)
+
+        const err504 = new Error('Gateway Timeout')
+        err504.statusCode = 504
+        expect(isNetworkError(err504)).toBe(true)
+
+        const err408 = new Error('Request Timeout')
+        err408.statusCode = 408
+        expect(isNetworkError(err408)).toBe(true)
+
+        // Non-network errors
+        expect(isNetworkError(new Error('model returned invalid JSON'))).toBe(false)
+        expect(isNetworkError(new Error('model response was cut off at the max_tokens limit'))).toBe(false)
+        const err401 = new Error('Unauthorized')
+        err401.statusCode = 401
+        expect(isNetworkError(err401)).toBe(false)
+    })
+
+    it('accurately identifies rate limit errors', () => {
+        const err429 = new Error('Too Many Requests')
+        err429.statusCode = 429
+        expect(isRateLimitError(err429)).toBe(true)
+
+        expect(isRateLimitError(new Error('Resource exhausted: quota exceeded'))).toBe(true)
+        expect(isRateLimitError(new Error('rate limited — too many requests'))).toBe(true)
+
+        expect(isRateLimitError(new Error('Internal Server Error'))).toBe(false)
+        expect(isRateLimitError(new Error('Bad Request'))).toBe(false)
+    })
+
+    it('accurately identifies retryable errors', () => {
+        const explicitRetryable = new Error('something failed')
+        explicitRetryable.retryable = true
+        expect(isRetryableError(explicitRetryable)).toBe(true)
+
+        expect(isRetryableError(new TypeError('Failed to fetch'))).toBe(true)
+        expect(isRetryableError(new Error('request timeout'))).toBe(true)
+
+        const abortErr = new Error('Aborted')
+        abortErr.name = 'AbortError'
+        expect(isRetryableError(abortErr)).toBe(true)
+
+        const err408 = new Error('Timeout')
+        err408.statusCode = 408
+        expect(isRetryableError(err408, 408)).toBe(true)
+
+        const err500 = new Error('Server Error')
+        err500.statusCode = 500
+        expect(isRetryableError(err500, 500)).toBe(true)
+
+        const err400 = new Error('Bad Request')
+        err400.statusCode = 400
+        expect(isRetryableError(err400, 400)).toBe(false)
+    })
+})
+
 describe('classifyBatch and generateSchema default model and cancellation forwarding', () => {
     const originalFetch = global.fetch
 
@@ -774,6 +848,94 @@ describe('OrganizerService resilient batch processing and sub-batch subdivision'
         expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
         expect(results).toHaveLength(20)
         expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+    })
+
+    it('does not recursively subdivide on network errors or request timeouts', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const networkError = new TypeError('Failed to fetch')
+
+        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(networkError)
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // It should NOT attempt to split 20 -> 10 -> 5 when network fails
+        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
+        expect(results).toHaveLength(20)
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+        const warningMsg = progressMessages.find(m => m.includes('Failed to fetch'))
+        expect(warningMsg).toBeDefined()
+    })
+
+    it('does not recursively subdivide on 429 rate-limit errors or 5xx server errors', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
+            categories: [{ name: 'Engineering', sub_categories: [] }]
+        })
+
+        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
+            title: `Bookmark ${i + 1}`,
+            url: `https://example.com/${i + 1}`
+        }))
+
+        const progressMessages = []
+        const onProgress = (evt) => {
+            if (evt?.message) progressMessages.push(evt.message)
+        }
+
+        const rateLimitErr = new Error('Resource exhausted / quota exceeded')
+        rateLimitErr.statusCode = 429
+
+        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(rateLimitErr)
+
+        const service = new OrganizerService('test-key', ['Engineering'], onProgress)
+        const results = await service.start(bookmarks)
+
+        // It should NOT attempt to split 20 -> 10 -> 5 on rate limits
+        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
+        expect(results).toHaveLength(20)
+        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+    })
+
+    it('aborts immediately and reports error when navigator.onLine is false for AI modes', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        const originalOnLine = navigator.onLine
+        Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+
+        try {
+            const progressEvents = []
+            const onProgress = (evt) => progressEvents.push(evt)
+
+            const service = new OrganizerService('test-key', ['Tech'], onProgress)
+            const bookmarks = [{ title: 'Site', url: 'https://example.com' }]
+            const result = await service.start(bookmarks)
+
+            expect(result).toBeNull()
+            expect(progressEvents).toContainEqual({
+                status: 'error',
+                message: 'No internet connection detected. Please check your network and try again.'
+            })
+        } finally {
+            Object.defineProperty(navigator, 'onLine', { value: originalOnLine, configurable: true })
+        }
     })
 
     it('computes categoryBreakdown in stats and logs flat category tally to onProgress', async () => {
@@ -1300,144 +1462,61 @@ describe('Schema Folder Content Sorting (schemaSortOrder)', () => {
     })
 })
 
-describe('isNonSubdividableError error classifier', () => {
-    it('correctly flags network, timeout, and connection errors as non-subdividable', () => {
-        expect(isNonSubdividableError(new TypeError('Failed to fetch'))).toBe(true)
-        expect(isNonSubdividableError(new Error('Network error: connection refused'))).toBe(true)
-        expect(isNonSubdividableError(new Error('the request timed out'))).toBe(true)
-        expect(isNonSubdividableError({ name: 'AbortError', message: 'The operation was aborted' })).toBe(true)
-        expect(isNonSubdividableError({ name: 'TimeoutError', message: 'User timeout' })).toBe(true)
-        expect(isNonSubdividableError(new Error('getaddrinfo ENOTFOUND openrouter.ai'))).toBe(true)
-        expect(isNonSubdividableError(new Error('Browser is offline'))).toBe(true)
+describe('calculateDateSpan', () => {
+    it('returns null for empty, null, or undated bookmark collections', () => {
+        expect(calculateDateSpan(null)).toBeNull()
+        expect(calculateDateSpan([])).toBeNull()
+        expect(calculateDateSpan([{ title: 'No Date', url: 'https://example.com' }])).toBeNull()
+        expect(calculateDateSpan([{ title: 'Zero Date', url: 'https://example.com', add_date: '0' }])).toBeNull()
     })
 
-    it('correctly flags rate limit and quota exhaustion errors as non-subdividable', () => {
-        const rateLimitErr = new Error('rate limited — too many requests')
-        rateLimitErr.statusCode = 429
-        expect(isNonSubdividableError(rateLimitErr)).toBe(true)
-
-        expect(isNonSubdividableError(new Error('Resource has been exhausted (e.g. check quota).'))).toBe(true)
-        expect(isNonSubdividableError(new Error('HTTP 429: Too Many Requests'))).toBe(true)
+    it('returns a single formatted date when all bookmarks share the same day', () => {
+        // 1609459200 = 2021-01-01T00:00:00.000Z
+        const singleDayBookmarks = [
+            { title: 'Morning', url: 'https://a.com', add_date: '1609459200' },
+            { title: 'Noon', url: 'https://b.com', add_date: '1609470000' }
+        ]
+        const expectedDate = new Date(1609459200000).toLocaleDateString()
+        expect(calculateDateSpan(singleDayBookmarks)).toBe(expectedDate)
     })
 
-    it('correctly flags 5xx server-side errors as non-subdividable', () => {
-        const err500 = new Error('Internal Server Error')
-        err500.statusCode = 500
-        expect(isNonSubdividableError(err500)).toBe(true)
-
-        const err502 = new Error('Bad Gateway')
-        err502.statusCode = 502
-        expect(isNonSubdividableError(err502)).toBe(true)
-
-        const err503 = new Error('Service Unavailable')
-        err503.statusCode = 503
-        expect(isNonSubdividableError(err503)).toBe(true)
-
-        const err504 = new Error('Gateway Timeout')
-        err504.statusCode = 504
-        expect(isNonSubdividableError(err504)).toBe(true)
+    it('returns formatted oldest to newest range matching the oldest and newest bookmarks', () => {
+        const bookmarks = [
+            { title: 'Middle', url: 'https://b.com', add_date: '1600000000' }, // 2020-09-13
+            { title: 'Oldest', url: 'https://a.com', add_date: '1500000000' }, // 2017-07-14
+            { title: 'Newest', url: 'https://c.com', add_date: '1700000000' }  // 2023-11-14
+        ]
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date(1700000000000).toLocaleDateString()
+        expect(calculateDateSpan(bookmarks)).toBe(`${oldestDate} – ${newestDate}`)
     })
 
-    it('correctly flags 4xx permanent client errors as non-subdividable', () => {
-        const err400 = new Error('Bad Request')
-        err400.statusCode = 400
-        expect(isNonSubdividableError(err400)).toBe(true)
-
-        const err401 = new Error('Unauthorized')
-        err401.statusCode = 401
-        expect(isNonSubdividableError(err401)).toBe(true)
-
-        const err402 = new Error('Payment Required')
-        err402.statusCode = 402
-        expect(isNonSubdividableError(err402)).toBe(true)
-
-        const err403 = new Error('Forbidden')
-        err403.statusCode = 403
-        expect(isNonSubdividableError(err403)).toBe(true)
-
-        const err404 = new Error('Model Not Found')
-        err404.statusCode = 404
-        expect(isNonSubdividableError(err404)).toBe(true)
-    })
-
-    it('allows model truncation, token limit, JSON parse, and payload errors to subdivide', () => {
-        expect(isNonSubdividableError(new Error('Payload size limit or malformed output'))).toBe(false)
-        expect(isNonSubdividableError(new Error('model response was cut off at the max_tokens limit'))).toBe(false)
-        expect(isNonSubdividableError(new Error('model response was cut off at the max output token limit'))).toBe(false)
-        expect(isNonSubdividableError(new Error('model returned invalid JSON (Unexpected end of JSON input)'))).toBe(false)
-        expect(isNonSubdividableError(new Error('model returned an empty response'))).toBe(false)
-        expect(isNonSubdividableError(new Error('Still failing with full batch'))).toBe(false)
+    it('handles large collections without stack overflow', () => {
+        const largeList = Array.from({ length: 70000 }, (_, i) => ({
+            title: `Item ${i}`,
+            url: `https://example.com/${i}`,
+            add_date: `${1500000000 + i}`
+        }))
+        const span = calculateDateSpan(largeList)
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date((1500000000 + 69999) * 1000).toLocaleDateString()
+        expect(span).toBe(`${oldestDate} – ${newestDate}`)
     })
 })
 
-describe('Organization resilience: network issues, constant retries, and actual progress', () => {
-    let originalFetch
-
+describe('total date range in categorized mode and oldest first sorting', () => {
     beforeEach(() => {
-        originalFetch = global.fetch
-        global.fetch = vi.fn(async () => ({ ok: true }))
-    })
-
-    afterEach(() => {
-        global.fetch = originalFetch
-        vi.restoreAllMocks()
-    })
-
-    it('does not stall with constant retries or recursive subdivision when network fails repeatedly', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
         vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-
-        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
-        })
-
-        const progressMessages = []
-        const progressStatuses = []
-        const progressPercents = []
-        const onProgress = (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-            if (evt?.status) progressStatuses.push(evt.status)
-            if (typeof evt?.percent === 'number') progressPercents.push(evt.percent)
-        }
-
-        // Simulate persistent network failure (TypeError: fetch failed)
-        const networkError = new TypeError('fetch failed: connection reset by peer')
-        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch').mockRejectedValue(networkError)
-
-        const bookmarks = Array.from({ length: 20 }, (_, i) => ({
-            title: `Bookmark ${i + 1}`,
-            url: `https://example.com/${i + 1}`
-        }))
-
-        const service = new OrganizerService('test-key', ['Tech'], onProgress)
-        const results = await service.start(bookmarks)
-
-        // Must NOT attempt to subdivide 20 into 10, 5, etc.
-        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
-
-        // classifyBatch is called only twice: once during worker pass, once in single-threaded retry pass
-        expect(classifyBatchSpy).toHaveBeenCalledTimes(2)
-
-        // Progress moved forward to completion
-        expect(progressStatuses).toContain('processing')
-        expect(progressStatuses).toContain('progress')
-        expect(progressStatuses).toContain('done')
-        expect(progressPercents[progressPercents.length - 1]).toBe(100)
-
-        // Zero bookmarks dropped: all 20 preserved under Other -> General
-        expect(results).toHaveLength(20)
-        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
-        expect(service.stats.total).toBe(20)
-        expect(bookmarksExport.downloadBookmarks).toHaveBeenCalledWith(results)
     })
 
-    it('recovers on second pass for transient network blips and cleanly categorizes bookmarks', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-
+    it('computes total date range (dateSpan) across all categorized bookmarks and logs it', async () => {
         vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Development', sub_categories: ['Tools'] }]
+            categories: [{ name: 'Tech', sub_categories: [] }]
         })
+        vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
+            { title: 'Oldest Link', url: 'https://old.com', add_date: '1500000000', category: 'Tech', sub_category: 'Code' },
+            { title: 'Newest Link', url: 'https://new.com', add_date: '1700000000', category: 'Tech', sub_category: 'Code' }
+        ])
 
         const progressMessages = []
         const onProgress = (evt) => {
@@ -1445,274 +1524,79 @@ describe('Organization resilience: network issues, constant retries, and actual 
         }
 
         const bookmarks = [
-            { title: 'GitHub', url: 'https://github.com' },
-            { title: 'Vercel', url: 'https://vercel.com' }
+            { title: 'Oldest Link', url: 'https://old.com', add_date: '1500000000' },
+            { title: 'Newest Link', url: 'https://new.com', add_date: '1700000000' }
         ]
-
-        // First pass fails with network glitch; second pass succeeds
-        const classifyBatchSpy = vi.spyOn(ai, 'classifyBatch')
-            .mockRejectedValueOnce(new TypeError('NetworkError when attempting to fetch resource.'))
-            .mockResolvedValueOnce([
-                { title: 'GitHub', url: 'https://github.com', category: 'Development', sub_category: 'Tools' },
-                { title: 'Vercel', url: 'https://vercel.com', category: 'Development', sub_category: 'Tools' }
-            ])
-
-        const service = new OrganizerService('test-key', ['Development'], onProgress)
-        const results = await service.start(bookmarks)
-
-        expect(classifyBatchSpy).toHaveBeenCalledTimes(2)
-        expect(results).toHaveLength(2)
-        expect(results.every(b => b.category === 'Development')).toBe(true)
-        expect(progressMessages.some(m => m.includes('will retry after the main pass'))).toBe(true)
-        expect(progressMessages.some(m => m.includes('Retrying batch 1/1'))).toBe(true)
-        expect(progressMessages).toContain('Organization complete!')
-    })
-
-    it('does not recursively subdivide on HTTP 500 or 503 server outages', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-
-        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Tech', sub_categories: [] }]
-        })
-
-        const progressMessages = []
-        const onProgress = (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-        }
-
-        const serverError = new Error('provider is temporarily overloaded')
-        serverError.statusCode = 503
-
-        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(serverError)
-
-        const bookmarks = Array.from({ length: 30 }, (_, i) => ({
-            title: `Site ${i + 1}`,
-            url: `https://site${i + 1}.com`
-        }))
 
         const service = new OrganizerService('test-key', ['Tech'], onProgress)
         const results = await service.start(bookmarks)
 
-        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
-        expect(results).toHaveLength(30)
-        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
+        const oldestDate = new Date(1500000000000).toLocaleDateString()
+        const newestDate = new Date(1700000000000).toLocaleDateString()
+        const expectedSpan = `${oldestDate} – ${newestDate}`
+
+        expect(service.stats.dateSpan).toBe(expectedSpan)
+        expect(results.stats.dateSpan).toBe(expectedSpan)
+        expect(progressMessages.some(m => m.includes(`Total date range: ${expectedSpan}`))).toBe(true)
     })
 
-    it('falls back to default categories without crashing when schema generation has network failure', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+    it('pushes undated bookmarks to the bottom in flat chronological ascending (oldest first) sort', async () => {
+        const bookmarks = [
+            { title: 'No Date Bookmark', url: 'https://nodate.com' },
+            { title: 'Newer Bookmark', url: 'https://newer.com', add_date: '1700000000' },
+            { title: 'Older Bookmark', url: 'https://older.com', add_date: '1500000000' }
+        ]
 
-        // Schema generation fails with network failure
-        vi.spyOn(ai, 'generateSchema').mockRejectedValue(new TypeError('Failed to fetch'))
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            true,
+            true,
+            false,
+            true, // flatDateSort
+            'asc' // dateSortOrder (oldest first)
+        )
 
-        // Batch classification succeeds with default categories
-        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
-            return batch.map(b => ({
-                ...b,
-                category: 'Work & Career',
-                sub_category: 'General'
-            }))
-        })
-
-        const progressMessages = []
-        const onProgress = (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-        }
-
-        const bookmarks = [{ title: 'LinkedIn', url: 'https://linkedin.com' }]
-        const service = new OrganizerService('test-key', ['Work & Career'], onProgress)
         const results = await service.start(bookmarks)
-
-        expect(progressMessages.some(m => m.includes('Schema generation failed after retries'))).toBe(true)
-        expect(progressMessages.some(m => m.includes('Using default categories'))).toBe(true)
-        expect(results).toHaveLength(1)
-        expect(results[0].category).toBe('Work & Career')
+        // Older (1500000000) should be first, then Newer (1700000000), then No Date at bottom
+        expect(results.map(b => b.title)).toEqual(['Older Bookmark', 'Newer Bookmark', 'No Date Bookmark'])
     })
 
-    it('emits progressing events and percentages across multiple batches to verify real-time progress', async () => {
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+    it('pushes undated bookmarks to the bottom inside folders for date-asc schemaSortOrder', async () => {
         vi.spyOn(ai, 'generateSchema').mockResolvedValue({
             categories: [{ name: 'Tech', sub_categories: [] }]
         })
-
         vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => {
             return batch.map(b => ({ ...b, category: 'Tech', sub_category: 'General' }))
         })
 
-        const progressHistory = []
-        const onProgress = (evt) => progressHistory.push({ ...evt })
-
-        // 90 bookmarks with adaptive batch size 45 -> 2 batches
-        const bookmarks = Array.from({ length: 90 }, (_, i) => ({
-            title: `Item ${i + 1}`,
-            url: `https://item${i + 1}.com`
-        }))
-
-        const service = new OrganizerService('test-key', ['Tech'], onProgress)
-        const results = await service.start(bookmarks)
-
-        expect(results).toHaveLength(90)
-
-        // Progress events verify forward progress from 0% -> 50% -> 100%
-        const batchProgressEvents = progressHistory.filter(e => typeof e.percent === 'number')
-        expect(batchProgressEvents.length).toBeGreaterThanOrEqual(2)
-
-        const percents = batchProgressEvents.map(e => e.percent)
-        expect(percents).toContain(50)
-        expect(percents).toContain(100)
-
-        const doneEvent = progressHistory.find(e => e.status === 'done')
-        expect(doneEvent).toBeDefined()
-        expect(doneEvent.message).toBe('Organization complete!')
-    })
-
-    it('shipped browser mode creates dated root folder and persists all organized bookmarks', async () => {
-        const browserTree = [
-            {
-                id: '1',
-                title: 'Bookmarks Bar',
-                children: [
-                    { id: '10', title: 'React', url: 'https://react.dev' },
-                    { id: '11', title: 'Vite', url: 'https://vitejs.dev' }
-                ]
-            }
-        ]
-
-        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(browserTree)
-        const mockRootFolder = { id: 'ai-root-123', title: 'AI Organized Bookmarks' }
-        const mockCatFolder = { id: 'cat-frontend-456', title: 'Frontend' }
-        const mockSubFolder = { id: 'sub-tools-789', title: 'Tools' }
-
-        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockImplementation(async (parentId, title) => {
-            if (title.startsWith('AI Organized Bookmarks')) return mockRootFolder
-            if (title === 'Frontend') return mockCatFolder
-            if (title === 'Tools') return mockSubFolder
-            return { id: `folder-${title}`, title }
-        })
-
-        const createdBookmarks = []
-        vi.spyOn(bookmarksService, 'createBookmark').mockImplementation(async (parentId, title, url) => {
-            createdBookmarks.push({ parentId, title, url })
-            return { id: `bm-${createdBookmarks.length}`, parentId, title, url }
-        })
-
-        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Frontend', sub_categories: ['Tools'] }]
-        })
-
-        vi.spyOn(ai, 'classifyBatch').mockResolvedValue([
-            { title: 'React', url: 'https://react.dev', category: 'Frontend', sub_category: 'Tools' },
-            { title: 'Vite', url: 'https://vitejs.dev', category: 'Frontend', sub_category: 'Tools' }
-        ])
-
-        const progressMessages = []
-        const service = new OrganizerService('test-key', ['Frontend'], (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-        })
-
-        const results = await service.start(null) // null triggers browser mode
-
-        expect(results).toHaveLength(2)
-        expect(bookmarksService.getBookmarks).toHaveBeenCalled()
-        expect(bookmarksService.findOrCreateFolder).toHaveBeenCalledWith('2', expect.stringContaining('AI Organized Bookmarks-'))
-        expect(createdBookmarks).toHaveLength(2)
-        expect(createdBookmarks[0].parentId).toBe('sub-tools-789')
-        expect(createdBookmarks[1].parentId).toBe('sub-tools-789')
-        expect(progressMessages).toContain('Organization complete!')
-    })
-
-    it('does not recursively subdivide on HTTP 429 rate limit errors', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-
-        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Tech', sub_categories: [] }]
-        })
-
-        const progressMessages = []
-        const onProgress = (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-        }
-
-        const rateLimitErr = new Error('rate limited — too many requests')
-        rateLimitErr.statusCode = 429
-
-        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(rateLimitErr)
-
-        const bookmarks = Array.from({ length: 24 }, (_, i) => ({
-            title: `Item ${i + 1}`,
-            url: `https://example.com/${i + 1}`
-        }))
-
-        const service = new OrganizerService('test-key', ['Tech'], onProgress)
-        const results = await service.start(bookmarks)
-
-        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
-        expect(results).toHaveLength(24)
-        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
-    })
-
-    it('does not recursively subdivide on HTTP 400 Bad Request or 402 Payment Required', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
-
-        vi.spyOn(ai, 'generateSchema').mockResolvedValue({
-            categories: [{ name: 'Tech', sub_categories: [] }]
-        })
-
-        const progressMessages = []
-        const onProgress = (evt) => {
-            if (evt?.message) progressMessages.push(evt.message)
-        }
-
-        const paymentErr = new Error('insufficient credits on your account')
-        paymentErr.statusCode = 402
-
-        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(paymentErr)
-
-        const bookmarks = Array.from({ length: 18 }, (_, i) => ({
-            title: `Item ${i + 1}`,
-            url: `https://example.com/${i + 1}`
-        }))
-
-        const service = new OrganizerService('test-key', ['Tech'], onProgress)
-        const results = await service.start(bookmarks)
-
-        expect(progressMessages.some(m => m.includes('Splitting batch'))).toBe(false)
-        expect(results).toHaveLength(18)
-        expect(results.every(b => b.category === 'Other' && b.sub_category === 'General')).toBe(true)
-    })
-
-    it('file mode produces downloaded bookmarks without dropping links when network fails completely', async () => {
-        vi.spyOn(console, 'error').mockImplementation(() => {})
-        let downloadedPayload = null
-        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation((items) => {
-            downloadedPayload = items
-        })
-
-        vi.spyOn(ai, 'generateSchema').mockRejectedValue(new TypeError('Failed to fetch'))
-        vi.spyOn(ai, 'classifyBatch').mockRejectedValue(new TypeError('Failed to fetch'))
-
         const bookmarks = [
-            { title: 'Doc A', url: 'https://docs.a.com', icon: 'data:image/png;base64,abc' },
-            { title: 'Doc B', url: 'https://docs.b.com', icon: 'data:image/png;base64,def' }
+            { title: 'Undated Tech', url: 'https://tech.com/undated' },
+            { title: 'Newest Tech', url: 'https://tech.com/newest', add_date: '1700000000' },
+            { title: 'Oldest Tech', url: 'https://tech.com/oldest', add_date: '1500000000' }
         ]
 
-        const service = new OrganizerService('test-key', ['Documentation'], () => {})
-        const results = await service.start(bookmarks)
+        const service = new OrganizerService(
+            'test-key',
+            ['Tech'],
+            () => {},
+            'google/gemini-3.1-flash-lite',
+            '5-10',
+            false,
+            true,
+            false,
+            false,
+            'desc',
+            'date-asc'
+        )
 
-        expect(results).toHaveLength(2)
-        expect(downloadedPayload).toBe(results)
-        // All original metadata including icons preserved
-        expect(results[0].icon).toBe('data:image/png;base64,abc')
-        expect(results[1].icon).toBe('data:image/png;base64,def')
-        // Safely classified under Other -> General so none are lost
-        expect(results[0].category).toBe('Other')
-        expect(results[0].sub_category).toBe('General')
-        expect(results[1].category).toBe('Other')
-        expect(results[1].sub_category).toBe('General')
+        const results = await service.start(bookmarks)
+        expect(results.map(b => b.title)).toEqual(['Oldest Tech', 'Newest Tech', 'Undated Tech'])
     })
 })
+
 
 

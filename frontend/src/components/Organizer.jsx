@@ -494,13 +494,14 @@ export default function Organizer() {
                 (data) => {
                     if (data.status === 'info') {
                         addLog(data.message);
-                    } else if (data.status === 'progress') {
-                        if (typeof data.percent === 'number') setProgress(data.percent);
-                        if (data.message) addLog(data.message);
-                        setBackgroundNotice('');
                     } else if (data.status === 'processing') {
                         if (data.message) addLog(data.message);
                         if (typeof data.percent === 'number') setProgress(data.percent);
+                    } else if (data.status === 'progress') {
+                        setProgress(data.percent);
+                        if (data.clearNotice) {
+                            setBackgroundNotice('');
+                        }
                     } else if (data.status === 'retry') {
                         addLog(data.message);
                         setBackgroundNotice(data.message);
@@ -519,6 +520,7 @@ export default function Organizer() {
                         setStatus('error');
                     } else if (data.status === 'success') {
                         addLog(data.message);
+                        setBackgroundNotice('');
                     } else if (data.status === 'done') {
                         addLog(data.message);
                         setBackgroundNotice('');
@@ -1432,6 +1434,7 @@ export default function Organizer() {
                         <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Last run: {lastOrganized.count.toLocaleString()} bookmarks {lastOrganized.stats?.isFlat ? 'sorted' : 'organized'}
                             {lastOrganized.stats?.isFlat && ` · ${lastOrganized.stats?.dateSortOrder === 'desc' ? 'Newest First' : 'Oldest First'}`}
+                            {lastOrganized.stats?.dateSpan && ` · ${lastOrganized.stats.dateSpan}`}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
                             {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
                             <span style={{ color: 'var(--text-muted)' }}> · {new Date(lastOrganized.savedAt).toLocaleString()}</span>
@@ -1584,6 +1587,12 @@ export default function Organizer() {
                                             <>
                                                 <span>•</span>
                                                 <span><strong>{SCHEMA_SORT_OPTIONS.find(o => o.id === lastOrganized.stats.schemaSortOrder)?.label || 'A–Z'}</strong></span>
+                                            </>
+                                        )}
+                                        {lastOrganized.stats.dateSpan && (
+                                            <>
+                                                <span>•</span>
+                                                <span>{lastOrganized.stats.dateSpan}</span>
                                             </>
                                         )}
                                     </>
