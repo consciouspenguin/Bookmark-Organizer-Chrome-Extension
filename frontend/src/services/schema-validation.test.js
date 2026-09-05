@@ -18,13 +18,29 @@ const orResponse = (content, finishReason = 'stop') => ({
 })
 
 // Five subcategories per category so the same fixture satisfies every
-// granularity floor, including the strictest ('10+' requires 5).
+// granularity floor, including the strictest ('10+' requires 5); three
+// categories so it also clears the breadth floor a narrowed (e.g. salvaged)
+// response fails.
 const healthySchema = {
     categories: [
         { name: 'Finance & Crypto', sub_categories: ['Trading & Markets', 'Crypto & Blockchain', 'Investing & Wealth', 'Banking & Payments', 'Tax & Economics'] },
-        { name: 'Tech & Development', sub_categories: ['Web Development', 'AI & Machine Learning', 'DevOps & Cloud', 'Databases', 'Security'] }
+        { name: 'Tech & Development', sub_categories: ['Web Development', 'AI & Machine Learning', 'DevOps & Cloud', 'Databases', 'Security'] },
+        { name: 'Work & Career', sub_categories: ['Job Search', 'Resume & Interviews', 'Industry Research', 'Networking', 'Learning & Courses'] }
     ]
 }
+
+// Builds a native Gemini generateContent response. `parts` is spread across
+// `content.parts` verbatim, which is how the API streams a long answer back.
+const geminiResponse = (parts, finishReason = 'STOP') => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+        candidates: [{ finishReason, content: { parts: parts.map(text => ({ text })) } }]
+    })
+})
+
+// Google AI Studio keys select the native Gemini path.
+const GEMINI_KEY = 'AIzaSyTestKey'
 
 // Enough bookmarks to clear TINY_COLLECTION_THRESHOLD (40) so the strict floors apply.
 const manyBookmarks = Array.from({ length: 50 }, (_, i) => ({
@@ -51,7 +67,37 @@ describe('validateSchema', () => {
 
         expect(result.ok).toBe(true)
         expect(result.issues).toEqual([])
-        expect(result.schema.categories).toHaveLength(2)
+        expect(result.schema.categories).toHaveLength(3)
+    })
+
+    it('rejects a response that covers too few of the configured categories', () => {
+        // The exact shape a MAX_TOKENS salvage produces: structurally fine, but
+        // every bookmark outside the two surviving categories would be coerced
+        // to "Other / General" during classification.
+        const narrow = { categories: healthySchema.categories.slice(0, 2) }
+        const expectedCategories = ['Finance & Crypto', 'Tech & Development', 'Work & Career', 'Design & Media', 'Travel & Lifestyle', 'Shopping & Tools']
+
+        const result = validateSchema(narrow, { subfolderTarget: '5-10', bookmarkCount: 4000, expectedCategories })
+
+        expect(result.ok).toBe(false)
+        expect(result.issues.join(' ')).toMatch(/covered only 2 categories; at least 3 are needed/)
+    })
+
+    it('scales the breadth floor to half the configured category list', () => {
+        const narrow = { categories: healthySchema.categories }
+        const tenCategories = Array.from({ length: 10 }, (_, i) => `Category ${i}`)
+
+        const result = validateSchema(narrow, { subfolderTarget: '5-10', bookmarkCount: 4000, expectedCategories: tenCategories })
+
+        expect(result.ok).toBe(false)
+        expect(result.issues.join(' ')).toMatch(/at least 5 are needed/)
+    })
+
+    it('exempts a tiny collection from the breadth floor', () => {
+        const oneCategory = { categories: [healthySchema.categories[0]] }
+
+        expect(validateSchema(oneCategory, { subfolderTarget: '5-10', bookmarkCount: 12 }).ok).toBe(true)
+        expect(validateSchema(oneCategory, { subfolderTarget: '5-10', bookmarkCount: 4000 }).ok).toBe(false)
     })
 
     it('rejects a response with no categories at all', () => {
@@ -94,7 +140,8 @@ describe('validateSchema', () => {
         const twoSubs = {
             categories: [
                 { name: 'Tech', sub_categories: ['Web Dev', 'AI'] },
-                { name: 'Finance', sub_categories: ['Trading', 'Crypto'] }
+                { name: 'Finance', sub_categories: ['Trading', 'Crypto'] },
+                { name: 'Travel', sub_categories: ['Flights', 'Hotels'] }
             ]
         }
 
@@ -220,7 +267,7 @@ describe('generateSchema validation and corrective retry', () => {
         const schema = await generateSchema(manyBookmarks, 'sk-or-test-key', ['Tech'], undefined, '5-10')
 
         expect(global.fetch).toHaveBeenCalledTimes(1)
-        expect(schema.categories).toHaveLength(2)
+        expect(schema.categories).toHaveLength(3)
         expect(schema.categories[0].sub_categories).toContain('Trading & Markets')
     })
 
@@ -233,7 +280,7 @@ describe('generateSchema validation and corrective retry', () => {
         const schema = await generateSchema(manyBookmarks, 'sk-or-test-key', ['Tech'], undefined, '5-10')
 
         expect(global.fetch).toHaveBeenCalledTimes(2)
-        expect(schema.categories).toHaveLength(2)
+        expect(schema.categories).toHaveLength(3)
 
         const correctionPrompt = JSON.parse(global.fetch.mock.calls[1][1].body).messages[1].content
         expect(correctionPrompt).toContain('CORRECTION REQUIRED')
@@ -347,6 +394,20 @@ describe('classifyBatch hybrid subcategory proposals', () => {
         expect(result[0].sub_category).toBe('web development')
     })
 
+    it('emits the schema spelling of a category the model wrote in another casing', async () => {
+        global.fetch = vi.fn(async () => classifyResponse([
+            { i: 0, category: 'Tech & Development', sub_category: 'Databases' },
+            { i: 1, category: 'tech & development', sub_category: 'Databases' },
+            { i: 2, category: 'TECH & DEVELOPMENT', sub_category: 'Security' }
+        ]))
+
+        const result = await classifyBatch(threeBookmarks, 'sk-or-test-key', healthySchema)
+
+        // Two spellings of one category would otherwise become two sibling
+        // top-level folders, each holding a partial set of the bookmarks.
+        expect(new Set(result.map(r => r.category))).toEqual(new Set(['Tech & Development']))
+    })
+
     it('coerces an invented category to Other/General', async () => {
         global.fetch = vi.fn(async () => classifyResponse([
             { i: 0, category: 'Totally Made Up', sub_category: 'Something' },
@@ -422,14 +483,36 @@ describe('truncation handling differs between schema design and classification',
     })
 
     it('salvages a truncated schema response instead of burning retries on it', async () => {
-        const truncated = '{"categories":[{"name":"Finance","sub_categories":["Trading","Crypto","Investing"]},{"name":"Tech","sub_categories":["Web Dev","AI","DevOp'
+        const truncated = '{"categories":[{"name":"Finance","sub_categories":["Trading","Crypto","Investing"]},'
+            + '{"name":"Tech","sub_categories":["Web Dev","AI","DevOps"]},'
+            + '{"name":"Travel","sub_categories":["Flights","Hotels","Guides"]},'
+            + '{"name":"Heal'
         global.fetch = vi.fn(async () => orResponse(truncated, 'length'))
 
         const schema = await generateSchema(manyBookmarks, 'sk-or-test-key', ['Finance'], undefined, '0-5')
 
         expect(global.fetch).toHaveBeenCalledTimes(1)
-        expect(schema.categories).toHaveLength(2)
-        expect(schema.categories[1].sub_categories).toEqual(['Web Dev', 'AI'])
+        // The three complete categories survive; the half-written fourth is dropped.
+        expect(schema.categories.map(c => c.name)).toEqual(['Finance', 'Tech', 'Travel'])
+    })
+
+    it('re-prompts when a salvaged schema is too narrow to classify the collection against', async () => {
+        // Cut off after category 2 of a 6-category ask: structurally valid but
+        // it would coerce every other bookmark to "Other / General".
+        const truncated = '{"categories":[{"name":"Finance","sub_categories":["Trading","Crypto","Investing"]},'
+            + '{"name":"Tech","sub_categories":["Web Dev","AI","DevOp'
+        const sixCategories = ['Finance', 'Tech', 'Travel', 'Health', 'Design', 'Shopping']
+
+        global.fetch = vi.fn()
+            .mockImplementationOnce(async () => orResponse(truncated, 'length'))
+            .mockImplementationOnce(async () => orResponse(JSON.stringify(healthySchema)))
+
+        const schema = await generateSchema(manyBookmarks, 'sk-or-test-key', sixCategories, undefined, '0-5')
+
+        expect(global.fetch).toHaveBeenCalledTimes(2)
+        expect(JSON.parse(global.fetch.mock.calls[1][1].body).messages[1].content)
+            .toMatch(/covered only 2 categories; at least 3 are needed/)
+        expect(schema.categories).toHaveLength(3)
     })
 
     it('still retries a truncated schema when nothing can be recovered', async () => {
@@ -440,7 +523,7 @@ describe('truncation handling differs between schema design and classification',
         const schema = await generateSchema(manyBookmarks, 'sk-or-test-key', ['Tech'], undefined, '5-10')
 
         expect(global.fetch).toHaveBeenCalledTimes(2)
-        expect(schema.categories).toHaveLength(2)
+        expect(schema.categories).toHaveLength(3)
     })
 
     it('never salvages a truncated classification batch, since the tail would be lost bookmarks', async () => {
@@ -470,6 +553,107 @@ describe('truncation handling differs between schema design and classification',
         await rejection
 
         // A retry was scheduled, proving the truncated body was rejected rather than salvaged.
+        expect(retryEvents).toHaveLength(1)
+        expect(retryEvents[0].error.message).toMatch(/cut off/)
+    })
+})
+
+describe('native Gemini response path', () => {
+    let originalFetch
+
+    const geminiBody = (call) => JSON.parse(call[1].body)
+
+    beforeEach(() => {
+        originalFetch = global.fetch
+    })
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.restoreAllMocks()
+        vi.useRealTimers()
+    })
+
+    it('salvages a schema cut off at MAX_TOKENS rather than burning a retry', async () => {
+        const truncated = '{"categories":[{"name":"Finance","sub_categories":["Trading","Crypto","Investing"]},'
+            + '{"name":"Tech","sub_categories":["Web Dev","AI","DevOps"]},'
+            + '{"name":"Travel","sub_categories":["Flights","Hotels","Guides"]},'
+            + '{"name":"Heal'
+        global.fetch = vi.fn(async () => geminiResponse([truncated], 'MAX_TOKENS'))
+
+        const schema = await generateSchema(manyBookmarks, GEMINI_KEY, ['Finance'], undefined, '0-5')
+
+        expect(global.fetch).toHaveBeenCalledTimes(1)
+        expect(schema.categories.map(c => c.name)).toEqual(['Finance', 'Tech', 'Travel'])
+    })
+
+    it('reassembles a response split across several content parts', async () => {
+        const whole = JSON.stringify(healthySchema)
+        const parts = [whole.slice(0, 40), whole.slice(40, 200), whole.slice(200)]
+        global.fetch = vi.fn(async () => geminiResponse(parts))
+
+        const schema = await generateSchema(manyBookmarks, GEMINI_KEY, ['Tech'], undefined, '5-10')
+
+        expect(global.fetch).toHaveBeenCalledTimes(1)
+        expect(schema.categories).toHaveLength(3)
+    })
+
+    it('treats a safety block as permanent and does not retry it', async () => {
+        global.fetch = vi.fn(async () => ({
+            ok: true,
+            status: 200,
+            json: async () => ({ promptFeedback: { blockReason: 'SAFETY' } })
+        }))
+
+        await expect(
+            generateSchema(manyBookmarks, GEMINI_KEY, ['Tech'], undefined, '5-10')
+        ).rejects.toThrow(/Gemini blocked the request \(SAFETY\)/)
+
+        expect(global.fetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends the bare model id and a JSON generationConfig', async () => {
+        global.fetch = vi.fn(async () => geminiResponse([JSON.stringify(healthySchema)]))
+
+        await generateSchema(manyBookmarks, GEMINI_KEY, ['Tech'], 'google/gemini-3.1-flash-lite', '5-10')
+
+        const [url, options] = global.fetch.mock.calls[0]
+        expect(url).toContain('/v1beta/models/gemini-3.1-flash-lite:generateContent')
+        expect(options.headers).not.toHaveProperty('Authorization')
+
+        const body = geminiBody(global.fetch.mock.calls[0])
+        expect(body.generationConfig).toMatchObject({
+            maxOutputTokens: SCHEMA_MAX_TOKENS,
+            responseMimeType: 'application/json'
+        })
+        expect(body.system_instruction.parts[0].text).toMatch(/information architect/)
+    })
+
+    it('never salvages a classification batch cut off at MAX_TOKENS', async () => {
+        vi.useFakeTimers()
+
+        const truncated = '{"classified":[{"i":0,"category":"Tech & Development","sub_category":"Web Development"'
+        global.fetch = vi.fn(async () => geminiResponse([truncated], 'MAX_TOKENS'))
+
+        let cancelled = false
+        const retryEvents = []
+
+        const promise = classifyBatch(
+            [{ title: 'Example', url: 'https://example.com' }],
+            GEMINI_KEY,
+            healthySchema,
+            'google/gemini-3.1-flash-lite',
+            false,
+            () => cancelled,
+            (evt) => {
+                retryEvents.push(evt)
+                cancelled = true
+            }
+        )
+        const rejection = expect(promise).rejects.toMatchObject({ isCancelled: true })
+
+        await vi.advanceTimersByTimeAsync(200)
+        await rejection
+
         expect(retryEvents).toHaveLength(1)
         expect(retryEvents[0].error.message).toMatch(/cut off/)
     })

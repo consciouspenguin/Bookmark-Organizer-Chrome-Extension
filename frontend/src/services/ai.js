@@ -506,10 +506,10 @@ export const SCHEMA_MAX_TOKENS = 16000;
 
 // Evenly spaced sample across the whole list. Bookmark exports are grouped by
 // folder, so spacing preserves topic variety better than taking the first N.
-function sampleForSchema(bookmarks) {
-    if (bookmarks.length <= SCHEMA_SAMPLE_LIMIT) return bookmarks;
-    const step = bookmarks.length / SCHEMA_SAMPLE_LIMIT;
-    return Array.from({ length: SCHEMA_SAMPLE_LIMIT }, (_, i) => bookmarks[Math.floor(i * step)]);
+function sampleForSchema(bookmarks, limit = SCHEMA_SAMPLE_LIMIT) {
+    if (bookmarks.length <= limit) return bookmarks;
+    const step = bookmarks.length / limit;
+    return Array.from({ length: limit }, (_, i) => bookmarks[Math.floor(i * step)]);
 }
 
 // Subcategory counts per category, keyed by the user's granularity setting.
@@ -547,7 +547,7 @@ const TINY_COLLECTION_THRESHOLD = 40;
 // Validate a model-generated schema and return a cleaned copy alongside any
 // reasons it is unusable. Normalizing here means callers (and the classifier)
 // never see filler subcategories or case-duplicate folder names.
-export function validateSchema(schema, { subfolderTarget = '5-10', bookmarkCount = Infinity } = {}) {
+export function validateSchema(schema, { subfolderTarget = '5-10', bookmarkCount = Infinity, expectedCategories = null } = {}) {
     const issues = [];
     const rawCategories = Array.isArray(schema?.categories) ? schema.categories : null;
 
@@ -590,6 +590,17 @@ export function validateSchema(schema, { subfolderTarget = '5-10', bookmarkCount
         return { ok: false, issues: ['no category had a usable name'], schema: { categories: [] } };
     }
 
+    // Breadth matters as much as depth. A truncated response that salvages
+    // cleanly still narrows the whole run: every bookmark outside the surviving
+    // categories is coerced to "Other" during classification. Tiny collections
+    // are exempt for the same reason they get a relaxed subcategory floor.
+    const floor = Array.isArray(expectedCategories) && expectedCategories.length > 0
+        ? Math.max(3, Math.ceil(expectedCategories.length / 2))
+        : 3;
+    if (bookmarkCount >= TINY_COLLECTION_THRESHOLD && categories.length < floor) {
+        issues.push(`the response covered only ${categories.length} categories; at least ${floor} are needed`);
+    }
+
     // Catch-all categories legitimately carry no subcategories, so they take
     // part in neither the per-category floor nor the overall ratio.
     const real = categories.filter(c => !isCatchAllCategory(c.name));
@@ -614,7 +625,7 @@ export function validateSchema(schema, { subfolderTarget = '5-10', bookmarkCount
     return { ok: issues.length === 0, issues, schema: { categories } };
 }
 
-export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", isCancelled = null, onRetry = null) {
+export async function generateSchema(bookmarks, apiKey, baseCategories, model = "google/gemini-3.1-flash-lite", subfolderTarget = "5-10", isCancelled = null, onRetry = null, sampleLimit = SCHEMA_SAMPLE_LIMIT) {
     const { ask: [askMin, askMax] } = subfolderBounds(subfolderTarget);
 
     const subfolderRules = {
@@ -625,7 +636,7 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
 
     const subfolderGuidance = subfolderRules[subfolderTarget] || subfolderRules['5-10'];
 
-    const schemaSource = sampleForSchema(bookmarks);
+    const schemaSource = sampleForSchema(bookmarks, sampleLimit);
     const sampleNote = schemaSource.length < bookmarks.length
         ? `\n    NOTE: The list below is a representative sample of ${schemaSource.length} bookmarks drawn evenly from the full collection. Design the structure for the ENTIRE collection of ${bookmarks.length}.\n`
         : '';
@@ -694,7 +705,7 @@ export async function generateSchema(bookmarks, apiKey, baseCategories, model = 
         onRetry
     );
 
-    const options = { subfolderTarget, bookmarkCount: bookmarks.length };
+    const options = { subfolderTarget, bookmarkCount: bookmarks.length, expectedCategories: baseCategories };
 
     const first = validateSchema(await attempt(null), options);
     if (first.ok) return first.schema;
@@ -763,15 +774,21 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
         }
 
         // Categories stay strictly schema-bound; only sub-categories may be
-        // proposed (rule 3). Look up the approved names once per batch.
+        // proposed (rule 3). Look up the approved names once per batch. The
+        // canonical spelling is carried alongside the sub-set: matching
+        // case-insensitively but emitting the model's own casing would give one
+        // category two sibling top-level folders in both write paths.
         const schemaCategories = new Map(
             (Array.isArray(schema?.categories) ? schema.categories : [])
                 .filter(c => typeof c?.name === 'string')
                 .map(c => [
                     c.name.trim().toLowerCase(),
-                    new Set((Array.isArray(c.sub_categories) ? c.sub_categories : [])
-                        .filter(s => typeof s === 'string')
-                        .map(s => s.trim().toLowerCase()))
+                    {
+                        name: c.name.trim(),
+                        subs: new Set((Array.isArray(c.sub_categories) ? c.sub_categories : [])
+                            .filter(s => typeof s === 'string')
+                            .map(s => s.trim().toLowerCase()))
+                    }
                 ])
         );
 
@@ -784,17 +801,17 @@ export async function classifyBatch(bookmarks, apiKey, schema, model = "google/g
 
             // An invented category is rejected outright — the schema's top level
             // is the user's own configured list, so a novel one is a mistake.
-            const knownSubs = schemaCategories.get(rawCategory.toLowerCase());
-            const category = knownSubs ? rawCategory : 'Other';
-            const sub_category = (knownSubs && rawSub) ? rawSub : 'General';
+            const known = schemaCategories.get(rawCategory.toLowerCase());
+            const category = known ? known.name : 'Other';
+            const sub_category = (known && rawSub) ? rawSub : 'General';
 
             // A sub-category absent from the schema is the model exercising
             // rule 3. Flag it so reconciliation can keep it only if enough
             // bookmarks landed there across all batches.
             const proposed = Boolean(
-                knownSubs &&
+                known &&
                 sub_category !== 'General' &&
-                !knownSubs.has(sub_category.toLowerCase())
+                !known.subs.has(sub_category.toLowerCase())
             );
 
             return {
