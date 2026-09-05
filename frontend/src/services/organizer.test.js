@@ -6,6 +6,77 @@ import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
 import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES, SCHEMA_SORT_OPTIONS } from '../components/Organizer'
 
+class FakeBookmarkStore {
+    constructor() {
+        this.nodes = new Map();   // id -> {id, parentId, title, url?, dateAdded?, children?: []}
+        this.ops = [];
+        const root = { id: '0', parentId: null, title: 'root', children: [] };
+        const bar = { id: '1', parentId: '0', title: 'Bookmarks Bar', children: [] };
+        const other = { id: '2', parentId: '0', title: 'Other Bookmarks', children: [] };
+        root.children.push(bar, other);
+        for (const n of [root, bar, other]) this.nodes.set(n.id, n);
+    }
+    rootTree() {
+        const root = this.nodes.get('0');
+        return [root];
+    }
+    node(id) { return this.nodes.get(String(id)); }
+    addFolder(parentId, id, title) {
+        const folder = { id: String(id), parentId: String(parentId), title, children: [] };
+        this.nodes.set(folder.id, folder);
+        this.node(parentId).children.push(folder);
+        return folder;
+    }
+    addUrl(parentId, id, url, title, dateAdded) {
+        const node = { id: String(id), parentId: String(parentId), title, url, dateAdded };
+        this.nodes.set(node.id, node);
+        this.node(parentId).children.push(node);
+        return node;
+    }
+    move(id, destination) {
+        this.ops.push(['move', String(id), destination]);
+        const node = this.node(id);
+        if (!node) return Promise.reject(new Error(`node ${id} not found`));
+        const oldParent = this.node(node.parentId);
+        oldParent.children = oldParent.children.filter(c => c.id !== node.id);
+        node.parentId = destination.parentId;
+        const newParent = this.node(destination.parentId);
+        if (!newParent) return Promise.reject(new Error(`parent ${destination.parentId} not found`));
+        const index = typeof destination.index === 'number' ? destination.index : newParent.children.length;
+        newParent.children.splice(Math.min(index, newParent.children.length), 0, node);
+        return Promise.resolve(node);
+    }
+    remove(id) {
+        this.ops.push(['remove', String(id)]);
+        const node = this.node(id);
+        if (!node) return Promise.reject(new Error(`node ${id} not found`));
+        this.node(node.parentId).children = this.node(node.parentId).children.filter(c => c.id !== node.id);
+        this.nodes.delete(String(id));
+        return Promise.resolve();
+    }
+    childrenOf(parentId) {
+        return Promise.resolve([...(this.node(parentId)?.children || [])]);
+    }
+}
+
+const wireStore = (store) => {
+    vi.spyOn(bookmarksService, 'moveBookmark').mockImplementation((id, dest) => store.move(id, dest));
+    vi.spyOn(bookmarksService, 'removeBookmark').mockImplementation((id) => store.remove(id));
+    vi.spyOn(bookmarksService, 'getBookmarkChildren').mockImplementation((pid) => store.childrenOf(pid));
+};
+
+describe('FakeBookmarkStore', () => {
+    it('FakeBookmarkStore move splices children and preserves dateAdded', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addFolder('2', 'f1', 'Target')
+        await store.move('10', { parentId: 'f1' })
+        expect(store.node('10').parentId).toBe('f1')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+        expect(store.childrenOf('1')).resolves.toHaveLength(0)
+    })
+})
+
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
         const bookmarks = [
