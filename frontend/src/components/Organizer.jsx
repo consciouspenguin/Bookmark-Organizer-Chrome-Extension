@@ -245,6 +245,14 @@ export default function Organizer() {
                         } else if (aj.status === 'complete' && res.organizedData) {
                             organizedResultsRef.current = res.organizedData;
                             if (aj.activeDateSpan) setActiveDateSpan(aj.activeDateSpan);
+                            setStatus('complete');
+                            setProgress(100);
+                            if (Array.isArray(aj.logs) && aj.logs.length > 0) {
+                                setLogs(aj.logs.map(l => ({
+                                    message: l.message,
+                                    timestamp: new Date(l.timestamp)
+                                })));
+                            }
                         }
                     }
                 });
@@ -275,13 +283,22 @@ export default function Organizer() {
                                     timestamp: new Date(l.timestamp)
                                 })));
                             }
-                        } else if (state.status === 'complete') {
+                        } else if (state.status === 'complete' && state.id) {
                             if (state.activeDateSpan) setActiveDateSpan(state.activeDateSpan);
+                            setStatus('complete');
+                            setProgress(100);
                             if (Array.isArray(state.logs) && state.logs.length > 0) {
                                 setLogs(state.logs.map(l => ({
                                     message: l.message,
                                     timestamp: new Date(l.timestamp)
                                 })));
+                            }
+                            if (!organizedResultsRef.current && chrome.storage?.session) {
+                                chrome.storage.session.get(['organizedData'], (sRes) => {
+                                    if (sRes?.organizedData) {
+                                        organizedResultsRef.current = sRes.organizedData;
+                                    }
+                                });
                             }
                         } else if (state.status === 'error') {
                             setStatus('error');
