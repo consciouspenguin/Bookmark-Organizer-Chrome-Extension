@@ -613,116 +613,63 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Independent Pipeline Demarcation Divider */}
-            {status === 'idle' && (
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    margin: '0.75rem 0 1.25rem 0'
-                }}>
-                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                    <span style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.75px',
-                        textTransform: 'uppercase',
-                        color: 'var(--text-muted)'
-                    }}>
-                        Independent Pipeline
-                    </span>
-                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                </div>
-            )}
-
-            {/* Sort by Date Added (Flat List) — Demarcated Alternative Pipeline */}
+            {/* Sort by Date Added (Flat List) — Conditionally Active Flat Pipeline */}
             {status === 'idle' && (
                 <div style={{
                     marginBottom: '2rem',
-                    padding: '1.5rem',
+                    padding: '1.25rem 1.5rem',
                     background: flatDateSort
-                        ? 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.22))'
-                        : 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.06))',
+                        ? 'linear-gradient(135deg, var(--surface-alt), var(--amber-soft))'
+                        : 'var(--surface-alt)',
                     borderRadius: '12px',
                     border: flatDateSort
-                        ? '2px solid var(--accent)'
-                        : '2px solid rgba(130, 149, 184, 0.45)',
-                    borderLeft: flatDateSort
-                        ? '6px solid var(--accent)'
-                        : '6px solid rgba(130, 149, 184, 0.75)',
+                        ? '2px solid var(--amber)'
+                        : '1.5px solid var(--amber-border)',
                     boxShadow: flatDateSort
-                        ? '0 0 0 3px var(--accent-soft), 0 6px 25px var(--accent-glow)'
-                        : '0 0 0 1px rgba(130, 149, 184, 0.15), 0 2px 10px rgba(0, 0, 0, 0.10)',
-                    transition: 'all 0.25s ease',
-                    position: 'relative'
+                        ? '0 0 0 3px var(--amber-soft), 0 4px 20px var(--amber-glow)'
+                        : 'none',
+                    transition: 'all 0.25s ease'
                 }}>
-                    {/* Top Mode Demarcation Badge */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            padding: '0.22rem 0.65rem',
-                            borderRadius: '20px',
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            letterSpacing: '0.5px',
-                            textTransform: 'uppercase',
-                            background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
-                            color: flatDateSort ? 'var(--on-accent)' : 'var(--text-primary)',
-                            border: flatDateSort ? 'none' : '1px solid rgba(130, 149, 184, 0.40)',
-                            boxShadow: flatDateSort ? '0 1px 8px var(--accent-glow)' : 'none'
-                        }}>
-                            <Zap size={11} style={{ color: flatDateSort ? 'var(--on-accent)' : 'var(--accent)' }} />
-                            {flatDateSort ? 'Flat Mode Active • Zero AI Tokens' : 'Alternative Pipeline • Zero AI Tokens'}
-                        </span>
-                        <span style={{
-                            fontSize: '0.72rem',
-                            color: flatDateSort ? 'var(--success)' : 'var(--text-muted)',
-                            fontWeight: 600,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.25rem',
-                            padding: '0.15rem 0.5rem',
-                            borderRadius: '10px',
-                            background: flatDateSort ? 'var(--success-soft)' : 'var(--surface-solid)',
-                            border: '1px solid var(--border)'
-                        }}>
-                            {flatDateSort ? (
-                                <>
-                                    <Check size={13} strokeWidth={2.5} />
-                                    <span>Schema-Free Mode</span>
-                                </>
-                            ) : (
-                                <span>Bypasses Folders &amp; AI Schema</span>
-                            )}
-                        </span>
-                    </div>
-
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
                             <div style={{
-                                width: '38px',
-                                height: '38px',
+                                width: '36px',
+                                height: '36px',
                                 borderRadius: '10px',
-                                background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
-                                color: flatDateSort ? 'var(--on-accent)' : 'var(--text-secondary)',
-                                border: '1px solid var(--border)',
+                                background: flatDateSort ? 'var(--amber-gradient)' : 'var(--surface-solid)',
+                                color: flatDateSort ? '#ffffff' : 'var(--amber)',
+                                border: '1px solid var(--amber-border)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 flexShrink: 0,
-                                boxShadow: flatDateSort ? '0 2px 8px var(--accent-glow)' : 'none',
-                                transition: 'all 0.2s ease'
+                                boxShadow: flatDateSort ? '0 2px 8px var(--amber-glow)' : 'none',
+                                transition: 'all 0.2s ease',
+                                marginTop: '2px'
                             }}>
-                                <Clock size={20} />
+                                <Clock size={18} />
                             </div>
                             <div>
-                                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '1rem', fontWeight: '700' }}>
-                                    Sort by Date Added (Flat List)
-                                </label>
-                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem', lineHeight: '1.4' }}>
-                                    Generates a single continuous list of bookmarks sorted chronologically with no folders or AI categories. Fast, zero-token execution.
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: '700' }}>
+                                        Sort by Date Added (Flat List)
+                                    </label>
+                                    <span style={{
+                                        fontSize: '0.68rem',
+                                        padding: '0.15rem 0.5rem',
+                                        borderRadius: '10px',
+                                        background: 'var(--amber-soft)',
+                                        border: '1px solid var(--amber-border)',
+                                        color: 'var(--amber)',
+                                        fontWeight: 700,
+                                        letterSpacing: '0.4px',
+                                        textTransform: 'uppercase'
+                                    }}>
+                                        Zero AI Tokens
+                                    </span>
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.25rem', lineHeight: '1.35' }}>
+                                    Orders all bookmarks chronologically into a single list without folders.
                                 </div>
                             </div>
                         </div>
@@ -735,14 +682,14 @@ export default function Organizer() {
                                 width: '46px',
                                 height: '26px',
                                 borderRadius: '13px',
-                                border: '1px solid var(--border)',
-                                background: flatDateSort ? 'var(--accent)' : 'var(--surface-solid)',
+                                border: '1px solid var(--amber-border)',
+                                background: flatDateSort ? 'var(--amber)' : 'var(--surface-solid)',
                                 position: 'relative',
                                 cursor: 'pointer',
                                 padding: 0,
                                 flexShrink: 0,
                                 transition: 'all 0.2s ease',
-                                boxShadow: flatDateSort ? '0 0 10px var(--accent-glow)' : 'none'
+                                boxShadow: flatDateSort ? '0 0 10px var(--amber-glow)' : 'none'
                             }}
                         >
                             <span style={{
@@ -752,7 +699,7 @@ export default function Organizer() {
                                 width: '20px',
                                 height: '20px',
                                 borderRadius: '50%',
-                                background: flatDateSort ? 'var(--on-accent)' : 'var(--text-muted)',
+                                background: flatDateSort ? '#ffffff' : 'var(--text-muted)',
                                 transition: 'left 0.2s ease',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
                             }} />
@@ -760,53 +707,38 @@ export default function Organizer() {
                     </div>
 
                     {flatDateSort && (
-                        <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(130, 149, 184, 0.25)' }}>
-                            <div style={{
-                                marginBottom: '1rem',
-                                padding: '0.85rem 1rem',
-                                borderRadius: '8px',
-                                background: 'var(--surface-solid)',
-                                border: '1px solid rgba(130, 149, 184, 0.35)',
-                                fontSize: '0.8rem',
-                                color: 'var(--text-secondary)',
-                                lineHeight: '1.45'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '0.25rem' }}>
-                                    <Zap size={14} style={{ color: 'var(--accent)' }} />
-                                    <span>How This Mode Works</span>
-                                </div>
-                                Bypasses folder creation and AI categorization (0 tokens used). All bookmarks are compiled into a clean, flat sequential file ordered strictly by timestamp.
-                                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.4rem', paddingTop: '0.4rem', borderTop: '1px dashed var(--border)', lineHeight: '1.4' }}>
-                                    ⚡ <strong>Token Note:</strong> Leaving &ldquo;Clean Titles with AI&rdquo; below off uses <strong>0 AI tokens</strong> (100% free &amp; offline). Toggling it on consumes AI tokens to rewrite bookmark titles.
-                                </div>
+                        <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--amber-border)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                <label style={{ color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: '600' }}>
+                                    Chronological Direction
+                                </label>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                    {dateSortOrder === 'desc' ? 'Newest bookmarks at the top' : 'Oldest bookmarks at the top'}
+                                </span>
                             </div>
-
-                            <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '600' }}>
-                                Chronological Direction
-                            </label>
-                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid rgba(130, 149, 184, 0.35)' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.3rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--amber-border)' }}>
                                 <button
                                     type="button"
                                     onClick={() => handleDateSortOrderChange('desc')}
                                     style={{
                                         flex: 1,
-                                        padding: '0.55rem 0.75rem',
+                                        padding: '0.5rem 0.75rem',
                                         borderRadius: '6px',
                                         border: 'none',
-                                        background: dateSortOrder === 'desc' ? 'var(--accent-gradient)' : 'transparent',
-                                        color: dateSortOrder === 'desc' ? 'var(--on-accent)' : 'var(--text-secondary)',
+                                        background: dateSortOrder === 'desc' ? 'var(--amber-gradient)' : 'transparent',
+                                        color: dateSortOrder === 'desc' ? '#ffffff' : 'var(--text-secondary)',
                                         cursor: 'pointer',
-                                        fontSize: '0.85rem',
+                                        fontSize: '0.82rem',
                                         fontWeight: dateSortOrder === 'desc' ? '600' : '500',
                                         transition: 'all 0.2s ease',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '0.4rem',
-                                        boxShadow: dateSortOrder === 'desc' ? '0 1px 10px var(--accent-glow)' : 'none'
+                                        boxShadow: dateSortOrder === 'desc' ? '0 1px 8px var(--amber-glow)' : 'none'
                                     }}
                                 >
-                                    <ArrowDown size={15} />
+                                    <ArrowDown size={14} />
                                     <span>Newest First</span>
                                 </button>
                                 <button
@@ -814,55 +746,28 @@ export default function Organizer() {
                                     onClick={() => handleDateSortOrderChange('asc')}
                                     style={{
                                         flex: 1,
-                                        padding: '0.55rem 0.75rem',
+                                        padding: '0.5rem 0.75rem',
                                         borderRadius: '6px',
                                         border: 'none',
-                                        background: dateSortOrder === 'asc' ? 'var(--accent-gradient)' : 'transparent',
-                                        color: dateSortOrder === 'asc' ? 'var(--on-accent)' : 'var(--text-secondary)',
+                                        background: dateSortOrder === 'asc' ? 'var(--amber-gradient)' : 'transparent',
+                                        color: dateSortOrder === 'asc' ? '#ffffff' : 'var(--text-secondary)',
                                         cursor: 'pointer',
-                                        fontSize: '0.85rem',
+                                        fontSize: '0.82rem',
                                         fontWeight: dateSortOrder === 'asc' ? '600' : '500',
                                         transition: 'all 0.2s ease',
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'center',
                                         gap: '0.4rem',
-                                        boxShadow: dateSortOrder === 'asc' ? '0 1px 10px var(--accent-glow)' : 'none'
+                                        boxShadow: dateSortOrder === 'asc' ? '0 1px 8px var(--amber-glow)' : 'none'
                                     }}
                                 >
-                                    <ArrowUp size={15} />
+                                    <ArrowUp size={14} />
                                     <span>Oldest First</span>
                                 </button>
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                                {dateSortOrder === 'desc'
-                                    ? 'Recently saved bookmarks appear at the top, oldest at the bottom.'
-                                    : 'Oldest saved bookmarks appear first in archive order.'}
-                            </div>
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* AI Folder Pipeline Demarcation Divider */}
-            {status === 'idle' && !flatDateSort && (
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    margin: '0.5rem 0 1.25rem 0'
-                }}>
-                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                    <span style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.75px',
-                        textTransform: 'uppercase',
-                        color: 'var(--text-muted)'
-                    }}>
-                        AI Folder Pipeline Settings
-                    </span>
-                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
                 </div>
             )}
 
