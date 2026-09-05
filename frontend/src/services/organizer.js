@@ -1,5 +1,5 @@
 import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder } from './bookmarks';
-import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT } from './ai';
+import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 
 // Fast reachability probe for URLs using no-cors and an aggressive timeout.
@@ -214,11 +214,21 @@ export class OrganizerService {
                 return [];
             }
 
-            // Permanent errors (like 401 Unauthorized, 403 Forbidden, 404 Model Not Found)
-            // cannot be resolved by splitting the batch. Avoid pointless recursive subdivision.
-            const isPermanentApiError = [401, 403, 404].includes(err?.statusCode);
+            // Permanent errors (400-404), network dropouts/timeouts, rate limits (429),
+            // and server gateway errors (500/502/503/504) cannot be resolved by splitting the batch.
+            // Avoid pointless recursive subdivision that stalls organization with exponential retries.
+            const isPermanentApiError = [400, 401, 403, 404].includes(err?.statusCode);
+            const isNetwork = isNetworkError(err);
+            const isRateLimit = isRateLimitError(err);
+            const isServerUnavailable = [500, 502, 503, 504].includes(err?.statusCode);
 
-            if (batchData.length > 5 && !isPermanentApiError) {
+            const canSubdivide = batchData.length > 5 &&
+                                 !isPermanentApiError &&
+                                 !isNetwork &&
+                                 !isRateLimit &&
+                                 !isServerUnavailable;
+
+            if (canSubdivide) {
                 const mid = Math.ceil(batchData.length / 2);
                 this.onProgress({
                     status: 'info',
@@ -232,7 +242,9 @@ export class OrganizerService {
             console.error(`Batch ${label} failed on second pass:`, err);
             this.onProgress({
                 status: 'warning',
-                message: `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.`
+                message: isNetwork
+                    ? `Batch ${label} could not be classified due to network issues (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.`
+                    : `Batch ${label} could not be classified (${err.message}). Its ${batchData.length} bookmarks were filed under Other → General so none are lost.`
             });
             return batchData.map(b => ({
                 ...b,
@@ -303,6 +315,16 @@ export class OrganizerService {
         if (allLinks.length === 0) {
             this.onProgress({ status: 'done', message: 'No bookmarks to organize.' });
             return null;
+        }
+
+        if (!this.flatDateSort || this.cleanTitles) {
+            if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                this.onProgress({
+                    status: 'error',
+                    message: 'No internet connection detected. Please check your network and try again.'
+                });
+                return null;
+            }
         }
 
         if (this.flatDateSort) {
@@ -436,7 +458,7 @@ export class OrganizerService {
                     this.model,
                     this.subfolderTarget,
                     () => this.isCancelled,
-                    ({ delayMs, isRateLimit, attempt }) => {
+                    ({ delayMs, isRateLimit }) => {
                         const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
                             status: 'warning',
@@ -510,7 +532,7 @@ export class OrganizerService {
                         this.model,
                         this.cleanTitles,
                         () => this.isCancelled,
-                        ({ delayMs, isRateLimit, attempt }) => {
+                        ({ delayMs, isRateLimit }) => {
                             const sec = Math.ceil(delayMs / 1000);
                             this.onProgress({
                                 status: 'warning',
@@ -525,7 +547,7 @@ export class OrganizerService {
                     // Accumulate results
                     results[index] = classified;
                     processed += batchData.length;
-                    this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
+                    this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)), clearNotice: true });
 
                 } catch (err) {
                     if (this.isCancelled || err?.isCancelled) return;
@@ -559,7 +581,7 @@ export class OrganizerService {
                 results[index] = await this.classifyWithSubdivision(batchData, schema, label);
                 if (this.isCancelled) break;
                 processed += batchData.length;
-                this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)) });
+                this.onProgress({ status: 'progress', percent: Math.min(100, Math.round((processed / total) * 100)), clearNotice: true });
             }
 
             if (this.isCancelled) {

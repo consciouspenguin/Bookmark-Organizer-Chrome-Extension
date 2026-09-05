@@ -73,7 +73,7 @@ npm run build
 
 #### 🌟 New Features & Enhancements
 - **Intra-Folder Content Sorting**: Added 5 folder sorting schemas (`Alphabetical A–Z`, `Date Added Newest First`, `Date Added Oldest First`, `By Website / Domain A–Z`, and `Reverse Alphabetical Z–A`).
-- **Sort by Date Added (Flat List)**: Added an independent chronological ordering mode that bypasses folder generation and uses **0 AI tokens** (100% offline & free), styled with a distinct warm amber border. Toggled off by default on every extension open.
+- **Sort by Date Added (Flat List)**: Added an independent chronological ordering mode that bypasses folder generation and uses **0 AI tokens** (100% offline & free), styled with a refined slate neutral border. Toggled off by default on every extension open.
 - **Clean Titles with AI**: Added an optional setting to intelligently clean and shorten truncated or messy web titles.
 - **Gemini Model Lineup Update**: Upgraded default model to `Gemini 3.1 Flash Lite` for near-instant latency and lowest token consumption, alongside `Gemini 3.8 Flash` and `Gemini 3.1 Pro Preview`.
 - **Quick API Key Links**: Added minimal direct links below the API key input to jump straight to Google AI Studio and OpenRouter key generation pages in a new tab.
