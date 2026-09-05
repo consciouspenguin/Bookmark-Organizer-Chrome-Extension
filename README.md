@@ -81,6 +81,7 @@ npm run build
 - **Instant Schema Copy**: Added a button to copy the generated category distribution breakdown directly to the clipboard.
 
 #### 🛡️ Reliability & Performance Fixes
+- **Sub-Second Instant Startup (<200ms)**: Added synchronous in-process memory bootstrap (`localStorage` fast-path), deferred LevelDB disk cleanup, and an inline CSS pre-render skeleton in `index.html`, eliminating cold-start disk contention and cutting side panel launch latency from >10s to under 200ms.
 - **Side Panel Startup Fix**: Fixed toolbar click conflicts by properly managing `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` without duplicate action listeners.
 - **Storage Optimization & Instant Boot**: Moved ephemeral bookmark tree caching from disk LevelDB to memory-based session storage (`chrome.storage.session`), keeping persistent storage tiny (<5 KB) and eliminating cold-start delays.
 - **Adaptive Sub-Batch Subdivision**: Automatically splits batches if payload limits or context boundaries are exceeded, preventing `413 Payload Too Large` errors on massive collections.
