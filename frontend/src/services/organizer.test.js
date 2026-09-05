@@ -1808,3 +1808,78 @@ describe('schema fallback path reporting', () => {
         expect(messages.filter(m => m.startsWith('Schema:'))).toHaveLength(1)
     })
 })
+
+describe('categorized browser write moves and isolates failures', () => {
+    const arrangeCategorized = (store) => {
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'createBookmark')
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({ categories: [{ name: 'Tech', sub_categories: [] }] })
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => batch.map(b => ({ ...b, category: 'Tech', sub_category: 'General' })))
+        wireStore(store)
+    }
+
+    it('categorized browser mode moves nodes into category folders, keeping dates', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockImplementation(async (parentId, title) => {
+            const found = [...store.nodes.values()].find(n => n.parentId === parentId && n.title === title && !n.url)
+            if (found) return found
+            const id = `folder-${title}`
+            return store.addFolder(parentId, id, title)
+        })
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(bookmarksService.createBookmark).not.toHaveBeenCalled()
+        expect(store.node('10').parentId).toBe('folder-Tech')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+    })
+
+    it('a category-folder failure fails only that item and records it', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        // First call creates the root; the category folder then fails.
+        vi.spyOn(bookmarksService, 'findOrCreateFolder')
+            .mockResolvedValueOnce(store.addFolder('2', 'org-root-1', 'AI Organized Bookmarks-2026-09-05'))
+            .mockRejectedValue(new Error('quota exceeded'))
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(service.failedMoves).toEqual([{ title: 'A', reason: 'quota exceeded' }])
+        expect(store.node('10').parentId).toBe('1') // untouched
+    })
+
+    it('a failed move records failedMoves but does not abort the run', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addUrl('1', '11', 'https://b.com', 'B', 1600000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockImplementation(async (parentId, title) => {
+            const found = [...store.nodes.values()].find(n => n.parentId === parentId && n.title === title && !n.url)
+            if (found) return found
+            const id = `folder-${title}`
+            return store.addFolder(parentId, id, title)
+        })
+        bookmarksService.moveBookmark.mockImplementation(async (id, dest) => {
+            if (id === '10') throw new Error('node not found')
+            return store.move(id, dest)
+        })
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(service.failedMoves).toEqual([{ title: 'A', reason: 'node not found' }])
+        expect(store.node('11').parentId).toBe('folder-Tech') // the healthy sibling still moved
+        expect(store.node('10').parentId).toBe('1')
+    })
+})

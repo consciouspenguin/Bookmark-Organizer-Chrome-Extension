@@ -899,58 +899,53 @@ export class OrganizerService {
                 console.warn('[Organizer] Download invocation deferred:', dlErr);
             }
         } else {
-            // Browser mode: Save bookmarks to Chrome
-            this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
-            
+            // Browser mode: relocate existing bookmarks (spec §6)
+            this.onProgress({ status: 'info', message: `Reorganizing ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} in the browser...`, dateSpan });
             const rootId = '2'; // 'Other Bookmarks' usually
             const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
-
-            // Clean up the folder cache before starting the write operation
             clearFolderCache();
 
-            // To avoid duplicate folder creation and empty folders:
             const createdFolders = {}; // path key -> folder Object
             const itemsWithParents = [];
 
             for (const item of finalResults) {
                 if (this.isCancelled) break;
-                
+
                 const category = item.category || "Uncategorized";
-                
-                // Find or create category folder
-                let catFolder;
-                if (createdFolders[category]) {
-                    catFolder = createdFolders[category];
-                } else {
-                    catFolder = await findOrCreateFolder(rootFolder.id, category);
-                    createdFolders[category] = catFolder;
-                }
-                
-                let targetParentId = catFolder.id;
-                
-                const subCategory = item.sub_category;
-                if (shouldCreateSubFolder(category, subCategory)) {
-                    const subPath = `${category}/${subCategory}`;
-                    let subFolder;
-                    if (createdFolders[subPath]) {
-                        subFolder = createdFolders[subPath];
+                let targetParentId;
+                try {
+                    let catFolder;
+                    if (createdFolders[category]) {
+                        catFolder = createdFolders[category];
                     } else {
-                        subFolder = await findOrCreateFolder(catFolder.id, subCategory);
-                        createdFolders[subPath] = subFolder;
+                        catFolder = await findOrCreateFolder(rootFolder.id, category);
+                        createdFolders[category] = catFolder;
                     }
-                    targetParentId = subFolder.id;
+
+                    targetParentId = catFolder.id;
+
+                    const subCategory = item.sub_category;
+                    if (shouldCreateSubFolder(category, subCategory)) {
+                        const subPath = `${category}/${subCategory}`;
+                        let subFolder;
+                        if (createdFolders[subPath]) {
+                            subFolder = createdFolders[subPath];
+                        } else {
+                            subFolder = await findOrCreateFolder(catFolder.id, subCategory);
+                            createdFolders[subPath] = subFolder;
+                        }
+                        targetParentId = subFolder.id;
+                    }
+                } catch (err) {
+                    this.failedMoves.push({ title: item.title, reason: err?.message || String(err) });
+                    continue;
                 }
-                
-                itemsWithParents.push({ parentId: targetParentId, title: item.title, url: item.url });
+
+                itemsWithParents.push({ item, parentId: targetParentId });
             }
 
-            // High-speed pipelined creation in chunks of 15 promises
-            const WRITE_CHUNK_SIZE = 15;
-            for (let i = 0; i < itemsWithParents.length; i += WRITE_CHUNK_SIZE) {
-                if (this.isCancelled) break;
-                const chunk = itemsWithParents.slice(i, i + WRITE_CHUNK_SIZE);
-                await Promise.all(chunk.map(b => createBookmark(b.parentId, b.title, b.url)));
-            }
+            await this.moveItems(itemsWithParents);
+            await this.removeDoomedDuplicates();
         }
 
         if (this.isCancelled) {
