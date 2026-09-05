@@ -1883,3 +1883,47 @@ describe('categorized browser write moves and isolates failures', () => {
         expect(store.node('10').parentId).toBe('1')
     })
 })
+
+describe('Phase B reorder pass and idempotency', () => {
+    it('reorders only misplaced nodes in a folder', async () => {
+        const store = new FakeBookmarkStore()
+        // children in wrong order: 12, 10, 11; expected: 10, 11, 12
+        store.addFolder('2', 'f1', 'Folder')
+        store.addUrl('f1', '12', 'https://c.com', 'C', 1700000000000)
+        store.addUrl('f1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addUrl('f1', '11', 'https://b.com', 'B', 1600000000000)
+        wireStore(store)
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite')
+        await service.reorderFolder('f1', ['10', '11', '12'])
+
+        const childIds = (await store.childrenOf('f1')).map(c => c.id)
+        expect(childIds).toEqual(['10', '11', '12'])
+        expect(store.ops.filter(([op]) => op === 'move')).toHaveLength(2) // 10 and 11 moved; 12 already home
+    })
+
+    it('a second identical organize run issues zero moves and zero removes (idempotency)', async () => {
+        // Same arrangement as Task 4's move test, run twice:
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://older.com', 'Older Link', 1500000000000)
+        store.addUrl('1', '11', 'https://newer.com', 'Newer Link', 1700000000000)
+        // rootTree() wraps the LIVE root node, so run 2 reads run 1's mutations
+        // through this same mock — no fixture rebuild, and never re-add the folder.
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => {} // installed for real in Task 7
+
+        await service.start(null)
+        const opsAfterFirst = store.ops.length
+        expect(opsAfterFirst).toBeGreaterThan(0)
+
+        const service2 = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service2.snapshotProvider = async () => {}
+        await service2.start(null)
+
+        expect(store.ops.slice(opsAfterFirst)).toEqual([]) // zero ops on the second run
+    })
+})

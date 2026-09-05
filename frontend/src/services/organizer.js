@@ -1,4 +1,4 @@
-import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, moveBookmark, removeBookmark, getBookmarkChildren } from './bookmarks';
+import { getBookmarks, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, moveBookmark, removeBookmark, getBookmarkChildren } from './bookmarks';
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 import { reconcileSubcategories } from './reconcile';
@@ -242,6 +242,32 @@ export class OrganizerService {
                 await removeBookmark(String(node.id));
             } catch (err) {
                 this.failedMoves.push({ title: node.title, reason: `duplicate remove failed: ${err?.message || err}` });
+            }
+        }
+    }
+
+    // Phase B: after every node is home, restore the expected order within
+    // each folder by moving ONLY the nodes that are misplaced (spec G4).
+    async reorderFolder(parentId, expectedIds) {
+        if (this.isCancelled || expectedIds.length === 0) return;
+        let children;
+        try {
+            children = await getBookmarkChildren(parentId);
+        } catch {
+            return;
+        }
+        const order = children.map(c => String(c.id));
+        for (let i = 0; i < expectedIds.length; i++) {
+            const want = String(expectedIds[i]);
+            if (order[i] === want) continue;
+            const pos = order.indexOf(want);
+            if (pos === -1) continue;
+            try {
+                await moveBookmark(want, { parentId, index: i });
+                order.splice(pos, 1);
+                order.splice(i, 0, want);
+            } catch (err) {
+                this.failedMoves.push({ title: want, reason: `reorder failed: ${err?.message || err}` });
             }
         }
     }
@@ -582,6 +608,7 @@ export class OrganizerService {
 
                 await this.moveItems(finalResults.map(item => ({ item, parentId: rootFolder.id })));
                 await this.removeDoomedDuplicates();
+                await this.reorderFolder(rootFolder.id, finalResults.map(r => r.id));
             }
 
             if (this.isCancelled) {
@@ -946,6 +973,15 @@ export class OrganizerService {
 
             await this.moveItems(itemsWithParents);
             await this.removeDoomedDuplicates();
+
+            const byFolder = new Map();
+            for (const { item, parentId } of itemsWithParents) {
+                if (!byFolder.has(parentId)) byFolder.set(parentId, []);
+                byFolder.get(parentId).push(item.id);
+            }
+            for (const [parentId, expectedIds] of byFolder) {
+                await this.reorderFolder(parentId, expectedIds);
+            }
         }
 
         if (this.isCancelled) {
