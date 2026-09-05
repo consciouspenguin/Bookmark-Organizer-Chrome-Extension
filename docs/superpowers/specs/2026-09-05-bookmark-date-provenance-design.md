@@ -1,7 +1,8 @@
 # Bookmark Date Provenance: Move-Based Browser Write
 
 - **Date:** 2026-09-05
-- **Status:** Approved design (sections 1-4 approved in conversation); awaiting spec review
+- **Status:** Approved (sections 1-4 in conversation; input-file preservation added at review).
+  Implementation plan: `docs/superpowers/plans/2026-09-05-bookmark-date-provenance.md`
 - **Scope:** Approach 1 only — prevention. Date recovery is explicitly out of scope (see Non-goals).
 - **Branch base:** `origin/main` at `ec1108b` (includes PR #45, run-in-background)
 
@@ -110,15 +111,20 @@ Consequences adopted into the design:
 Principle: the read → classify → sort pipeline is untouched. Only the browser write-back
 changes, from "create copies" to "relocate the nodes that already exist."
 
-1. **Read.** No change. The tree walk (organizer.js:272-278) already carries `id` (:275),
-   `title`, `url`, `dateAdded`, and derived `add_date`.
+1. **Read.** Effectively unchanged. The tree walk (organizer.js:272-278) already carries `id`
+   (:275), `title`, `url`, `dateAdded`, and derived `add_date`; the one addition is `parentId`
+   (see Write below).
 2. **Index.** New `buildUrlIndex(allLinks)` in `organizer.js`:
    `Map<url, Array<{id, dateAdded}>>`, each list sorted by `dateAdded` ascending, numeric id
    as tie-break. Built from the full tree before any list-level filtering.
-3. **Write.** Both browser branches — flat (:424-439) and categorized (:694-747) — resolve
-   each classified item's URL through the index and call `moveBookmark(id, {parentId})`
-   (bookmarks.js:53-63, exists, currently unused) instead of `createBookmark`. A new
-   `removeBookmark(id)` wrapper in `bookmarks.js` handles duplicate deletion.
+3. **Write.** Both browser branches — flat (:424-439) and categorized (:694-747) — call
+   `moveBookmark(id, {parentId})` (bookmarks.js:53-63, exists, currently unused) on each
+   classified item's node instead of `createBookmark`; a new `removeBookmark(id)` wrapper in
+   `bookmarks.js` handles duplicate deletion. The tree read (:272-278) additionally carries
+   `parentId`, and a node whose current parent already equals its target is skipped:
+   `chrome.bookmarks.move` without an index sends a node to the end of its parent's children,
+   so re-issuing same-parent moves would reshuffle folders on every re-run. The skip is what
+   makes G4 hold.
 4. **Snapshot.** Via `snapshotProvider` (Section 5), invoked after classification and before
    the first mutation. This call is new: browser mode never exports today — the existing
    `downloadBookmarks` calls (:426, :693) both sit inside the `if (fileBookmarks)` branches
@@ -216,10 +222,11 @@ deletes) — reorder and idempotency cannot be tested against call-recording spi
 `stats.failedMoves.length > 0`; new cancellation copy. Existing pill/banner tests stay
 green — `stats` only gains fields.
 
-**Deliberate contract inversions in existing tests** (they encode the old behavior):
-`organizer.test.js` assertions that `downloadBookmarks` is not called in browser mode
-(:785, :1240 region) now expect it; the browser flat-mode test (:1190) is rewritten from
-create-assertions to move-assertions.
+**Deliberate contract inversions in existing tests** (they encode the old behavior): the
+browser flat-mode test (organizer.test.js:1190-1241) asserts both `createBookmark` calls and
+that `downloadBookmarks` is not called (:1240) — it is rewritten from create-assertions to
+move-assertions, which removes the inverted assertion. (The other `downloadBookmarks`
+not-called assertion, :785, is a file-mode cancellation test and stays as-is.)
 
 **The honest gate.** jsdom cannot establish that Chromium preserves dates; the probe already
 did. No unit test re-asserts date preservation through a mock (a mock echoes the date back —
@@ -240,3 +247,25 @@ verify dates survived, duplicates collapsed, folders correct.
   (bookmarks.js:103-128, a second copy-based write path) has live callers and should convert
   to move semantics or be deleted. Resolve during planning; do not silently leave a
   date-destroying path in the codebase.
+
+## 12. Input file preservation (file mode)
+
+Added at spec review. File-mode users currently have no in-extension copy of the file they
+dropped in: once parsed, the original lives only on the user's disk, and nothing in the UI
+represents it. The owner wants users to never need a manual safety copy.
+
+- **What is cached:** the raw uploaded HTML text, byte-for-byte, plus metadata
+  `{filename, size, savedAt, count, dateSpan}`. Raw text (not parsed JSON) so re-download is
+  the exact original and re-parse yields the original `ADD_DATE` values — the cached input is
+  file mode's date source of truth, the analog of the browser-mode snapshot.
+- **Where:** `chrome.storage.local` under key `inputBookmarks`. The manifest gains the
+  `unlimitedStorage` permission (no Chrome permission warning is shown for it).
+- **Bound:** hard cap of 25 MB of HTML. Above the cap the cache is skipped with a visible log
+  notice and the run proceeds — caching must never block organizing.
+- **UI:** an "Input Bookmarks" card in the idle state (next to the last-run banner) showing
+  filename, bookmark count, and save date, with three actions: **Download original** (the
+  pristine HTML), **Re-organize** (feeds the cached HTML through the existing
+  `parseBookmarks` flow without re-upload), **Remove**. Dropping a new file replaces the
+  cached entry.
+- **Immutability:** organize runs never mutate the cached input; results continue to live in
+  `organizedMeta` / `organizedData` as today.
