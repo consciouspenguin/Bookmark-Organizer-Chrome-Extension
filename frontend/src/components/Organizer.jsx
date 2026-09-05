@@ -1,9 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree, ExternalLink } from 'lucide-react'
-import { OrganizerService } from '../services/organizer'
-import { detectProvider } from '../services/ai'
 import { parseBookmarks } from '../utils/parser'
-import { downloadBookmarks } from '../services/bookmarks_export'
 
 export const DEFAULT_CATEGORIES = [
     'Work & Career',
@@ -108,7 +105,7 @@ export default function Organizer() {
     })
 
     // Auto-detect provider from key format
-    const provider = useMemo(() => detectProvider(apiKey), [apiKey])
+    const provider = useMemo(() => (apiKey || '').trim().startsWith('AIza') ? 'gemini' : 'openrouter', [apiKey])
 
     // Models supported for Google Gemini
     const models = useMemo(() => [
@@ -262,6 +259,16 @@ export default function Organizer() {
         }
     }, [])
 
+    // Warm the lazy organize pipeline after first paint so clicking
+    // Organize is never slower than the old eager bundle.
+    useEffect(() => {
+        const idle = window.requestIdleCallback || (cb => setTimeout(cb, 200))
+        idle(() => {
+            import('../services/organizer')
+            import('../services/bookmarks_export')
+        })
+    }, [])
+
     // Save Settings to both in-process memory and chrome.storage
     const updateSetting = useCallback((key, val) => {
         try {
@@ -392,7 +399,8 @@ export default function Organizer() {
         }
     }, [logs])
 
-    const downloadOrganized = useCallback(() => {
+    const downloadOrganized = useCallback(async () => {
+        const { downloadBookmarks } = await import('../services/bookmarks_export')
         if (organizedResultsRef.current) {
             downloadBookmarks(organizedResultsRef.current)
             return
@@ -488,6 +496,7 @@ export default function Organizer() {
             setErrorMsg('');
             setBackgroundNotice('');
 
+            const { OrganizerService } = await import('../services/organizer')
             organizerRef.current = new OrganizerService(
                 apiKey,
                 categories,
