@@ -187,7 +187,7 @@ describe('classifyBatch cleanTitles option', () => {
         expect(result[2].sub_category).toBe('General')
 
         // Verify prompt contains title cleanup instructions and updated example return schema
-        expect(capturedBody.messages[1].content).toContain('6. Title cleanup: If clean_title is requested')
+        expect(capturedBody.messages[1].content).toContain('7. Title cleanup: If clean_title is requested')
         expect(capturedBody.messages[1].content).toContain('{ "classified": [ { "i": 0, "category": "...", "sub_category": "...", "clean_title": "..." } ] }')
     })
 })
@@ -580,7 +580,7 @@ describe('classifyBatch and generateSchema default model and cancellation forwar
                         {
                             message: {
                                 content: JSON.stringify({
-                                    categories: [{ name: 'Tech', sub_categories: ['General'] }]
+                                    categories: [{ name: 'Tech', sub_categories: ['Coding'] }]
                                 })
                             }
                         }
@@ -1620,5 +1620,88 @@ describe('Netscape HTML export and timestamp parsing', () => {
         expect(getBookmarkTimestamp({ date: '2021-01-01T00:00:00.000Z' })).toBe(1609459200000)
         expect(getBookmarkTimestamp(null)).toBe(0)
         expect(getBookmarkTimestamp({})).toBe(0)
+    })
+})
+
+describe('schema fallback path reporting', () => {
+    let originalFetch
+
+    const bookmarks = Array.from({ length: 300 }, (_, i) => ({
+        title: `Bookmark ${i}`,
+        url: `https://example.com/${i}`
+    }))
+
+    const healthySchema = {
+        categories: [
+            { name: 'Engineering', sub_categories: ['Frontend', 'Backend', 'Infra'] },
+            { name: 'Finance', sub_categories: ['Trading', 'Crypto', 'Banking'] },
+            { name: 'Travel', sub_categories: ['Flights', 'Hotels', 'Guides'] }
+        ]
+    }
+
+    const run = async (generateSchemaImpl) => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) =>
+            batch.map(b => ({ ...b, category: 'Engineering', sub_category: 'Frontend' }))
+        )
+        const spy = vi.spyOn(ai, 'generateSchema').mockImplementation(generateSchemaImpl)
+
+        const events = []
+        const service = new OrganizerService('test-key', ['Engineering', 'Finance', 'Travel'], (e) => events.push(e))
+        await service.start(bookmarks)
+
+        return { spy, events, messages: events.map(e => e.message).filter(Boolean) }
+    }
+
+    beforeEach(() => {
+        originalFetch = global.fetch
+        global.fetch = vi.fn(async () => ({ ok: true }))
+    })
+
+    afterEach(() => {
+        global.fetch = originalFetch
+        vi.restoreAllMocks()
+    })
+
+    it('hands the reduced-sample retry the whole collection and a halved sample limit', async () => {
+        let call = 0
+        const { spy } = await run(async () => {
+            if (call++ === 0) throw new Error('token ceiling')
+            return healthySchema
+        })
+
+        // Taking the head of a folder-grouped export would design the whole
+        // structure from one corner of the collection; the spacing lives in
+        // generateSchema, so it is handed everything plus a smaller limit.
+        const [retryBookmarks, , , , , , , sampleLimit] = spy.mock.calls.at(-1)
+        expect(retryBookmarks).toHaveLength(bookmarks.length)
+        expect(sampleLimit).toBe(Math.floor(ai.SCHEMA_SAMPLE_LIMIT / 2))
+    })
+
+    it('describes the corrective round-trip instead of calling it a network issue', async () => {
+        const { messages } = await run(async (...args) => {
+            const onRetry = args[6]
+            onRetry({ attempt: 1, delayMs: 0, error: new Error('the structure is flat overall'), isRateLimit: false, isSchemaCorrection: true })
+            return healthySchema
+        })
+
+        expect(messages.some(m => m.includes('too flat (the structure is flat overall)'))).toBe(true)
+        expect(messages.some(m => m.includes('Network issue during schema generation'))).toBe(false)
+    })
+
+    it('reports the curated fallback without flipping the run into a terminal error state', async () => {
+        const { events, messages } = await run(async () => {
+            const err = new Error('nope')
+            err.statusCode = 400
+            throw err
+        })
+
+        expect(messages.some(m => m.includes('used built-in default folders'))).toBe(true)
+        // `status: 'error'` is a lifecycle signal: it would strand the panel on
+        // a failure screen for the rest of a run that is still going.
+        expect(events.some(e => e.status === 'error')).toBe(false)
+        // M3: the shape of the degraded structure is logged here too.
+        expect(messages.filter(m => m.startsWith('Schema:'))).toHaveLength(1)
     })
 })

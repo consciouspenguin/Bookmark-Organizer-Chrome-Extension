@@ -100,29 +100,3 @@ export async function findOrCreateFolder(parentId, title) {
     return promise;
 }
 
-export async function organizeBookmarksResult(classifiedBookmarks) {
-    const isFlat = Boolean(classifiedBookmarks?.isFlat) || (Array.isArray(classifiedBookmarks) && classifiedBookmarks.length > 0 && classifiedBookmarks.every(b => !b.category));
-    const rootId = '2';
-    const folderTitle = isFlat ? "Chronological Bookmarks" : "AI Organized Bookmarks";
-    const targetRoot = await findOrCreateFolder(rootId, folderTitle);
-
-    for (const item of classifiedBookmarks) {
-        try {
-            if (isFlat || !item.category) {
-                await createBookmark(targetRoot.id, item.title, item.url);
-            } else {
-                const catFolder = await findOrCreateFolder(targetRoot.id, item.category);
-                let targetParentId = catFolder.id;
-
-                if (item.sub_category) {
-                    const subFolder = await findOrCreateFolder(catFolder.id, item.sub_category);
-                    targetParentId = subFolder.id;
-                }
-
-                await createBookmark(targetParentId, item.title, item.url);
-            }
-        } catch (e) {
-            console.error("Failed to create bookmark", item, e);
-        }
-    }
-}

@@ -1,4 +1,5 @@
 import { calculateDateSpan } from '../utils/dates';
+import { shouldCreateSubFolder } from './bookmarks';
 
 // HTML escape function to prevent XSS
 function escapeHtml(text) {
@@ -68,15 +69,24 @@ ${dateSpan ? `     Date range: ${dateSpan}\n` : ''}     It will be read and over
         return html;
     }
 
-    // Group by category and subcategory
-    const structured = {};
+    // Group by category and subcategory. Prototype-free objects: a proposed
+    // sub_category named "constructor" or "toString" would otherwise read as
+    // already-present via the prototype chain, skip its array initialisation,
+    // and throw on push — losing the entire export to a caught console.warn.
+    const structured = Object.create(null);
 
     bookmarks.forEach(b => {
         const cat = b.category || "Uncategorized";
-        const sub = b.sub_category || null;
+        const sub = b.sub_category;
 
-        if (!structured[cat]) structured[cat] = {};
-        if (sub) {
+        if (!structured[cat]) structured[cat] = Object.create(null);
+
+        // Mirror the browser-write path exactly: `shouldCreateSubFolder` rejects
+        // "General", "None", "Uncategorized" and a subcategory echoing its own
+        // parent. Treating those as real folders here is what produced a literal
+        // "General" folder under every category on HTML import, while the same
+        // run in browser mode filed them directly under the category.
+        if (shouldCreateSubFolder(cat, sub)) {
             if (!structured[cat][sub]) structured[cat][sub] = [];
             structured[cat][sub].push(b);
         } else {
