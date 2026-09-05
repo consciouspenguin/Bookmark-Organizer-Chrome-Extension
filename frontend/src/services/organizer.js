@@ -259,22 +259,33 @@ export class OrganizerService {
     // defaults. Halving the sample relieves the token pressure that truncates
     // large structures, and the balanced granularity asks for less than '10+'.
     async retrySchemaOnSmallerSample(activeLinks) {
-        const reducedSample = activeLinks.slice(0, Math.max(1, Math.floor(SCHEMA_SAMPLE_LIMIT / 2)));
+        // Halve the sample limit rather than slicing the head off the list:
+        // exports are grouped by folder, so the first N bookmarks are one
+        // corner of the collection. generateSchema spaces the sample itself.
+        const reducedLimit = Math.max(1, Math.floor(SCHEMA_SAMPLE_LIMIT / 2));
+        const sampleSize = Math.min(reducedLimit, activeLinks.length);
 
         this.onProgress({
             status: 'info',
-            message: `Retrying schema generation on a smaller sample of ${reducedSample.length.toLocaleString()} bookmarks...`
+            message: `Retrying schema generation on a smaller sample of ${sampleSize.toLocaleString()} bookmarks...`
         });
 
         try {
             const schema = await generateSchema(
-                reducedSample,
+                activeLinks,
                 this.apiKey,
                 this.categories,
                 this.model,
                 '5-10',
                 () => this.isCancelled,
-                ({ delayMs, isRateLimit }) => {
+                ({ delayMs, isRateLimit, isSchemaCorrection, error }) => {
+                    if (isSchemaCorrection) {
+                        this.onProgress({
+                            status: 'warning',
+                            message: `The first folder structure was too flat (${error.message}) — asking the AI to try again with specifics.`
+                        });
+                        return;
+                    }
                     const sec = Math.ceil(delayMs / 1000);
                     this.onProgress({
                         status: 'warning',
@@ -282,7 +293,8 @@ export class OrganizerService {
                             ? `Rate limit reached (429). Pausing for ${sec}s before retrying schema generation...`
                             : `Network issue during schema generation. Retrying in ${sec}s...`
                     });
-                }
+                },
+                reducedLimit
             );
 
             this.onProgress({ status: 'success', message: 'Schema generation succeeded on the smaller sample.' });
@@ -525,7 +537,17 @@ export class OrganizerService {
                     this.model,
                     this.subfolderTarget,
                     () => this.isCancelled,
-                    ({ delayMs, isRateLimit }) => {
+                    ({ delayMs, isRateLimit, isSchemaCorrection, error }) => {
+                        // The corrective round-trip is not a transport failure:
+                        // reporting it as one hides the only signal that says
+                        // why the structure came back flat.
+                        if (isSchemaCorrection) {
+                            this.onProgress({
+                                status: 'warning',
+                                message: `The first folder structure was too flat (${error.message}) — asking the AI to try again with specifics.`
+                            });
+                            return;
+                        }
                         const sec = Math.ceil(delayMs / 1000);
                         this.onProgress({
                             status: 'warning',
@@ -564,14 +586,19 @@ export class OrganizerService {
                     const { schema: fallback, curatedCount, carriedCount } = buildFallbackSchema(this.categories, err?.partialSchema);
                     schema = fallback;
 
+                    // `status` is a lifecycle signal in both consumers, not a
+                    // log severity: 'error' would flip the panel to a terminal
+                    // failure screen for the rest of a run that is still going,
+                    // and jobRunner does not log it at all.
                     this.onProgress({
-                        status: 'error',
+                        status: 'warning',
                         message: 'AI schema generation failed — used built-in default folders. Re-run for a structure tailored to your bookmarks.'
                     });
                     this.onProgress({
                         status: 'warning',
                         message: `Fallback structure: ${curatedCount} categor${curatedCount === 1 ? 'y' : 'ies'} from built-in defaults, ${carriedCount} salvaged from the AI response.`
                     });
+                    this.onProgress({ status: 'info', message: this.describeSchema(schema) });
 
                     const structureless = schema.categories.filter(c => c.sub_categories.length === 0).length;
                     if (structureless > 0) {
