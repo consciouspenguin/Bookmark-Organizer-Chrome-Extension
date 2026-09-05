@@ -613,45 +613,90 @@ export default function Organizer() {
                 </div>
             )}
 
-            {/* Sort by Date Added (Flat List) */}
+            {/* Independent Pipeline Demarcation Divider */}
+            {status === 'idle' && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    margin: '0.75rem 0 1.25rem 0'
+                }}>
+                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                    <span style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.75px',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-muted)'
+                    }}>
+                        Independent Pipeline
+                    </span>
+                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                </div>
+            )}
+
+            {/* Sort by Date Added (Flat List) — Demarcated Alternative Pipeline */}
             {status === 'idle' && (
                 <div style={{
                     marginBottom: '2rem',
                     padding: '1.5rem',
                     background: flatDateSort
-                        ? 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.18))'
-                        : 'var(--surface-alt)',
+                        ? 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.22))'
+                        : 'linear-gradient(135deg, var(--surface-alt), rgba(130, 149, 184, 0.06))',
                     borderRadius: '12px',
-                    border: flatDateSort ? '2px solid var(--accent)' : '1px dashed var(--border-strong)',
-                    boxShadow: flatDateSort ? '0 4px 20px var(--accent-glow)' : 'none',
+                    border: flatDateSort
+                        ? '2px solid var(--accent)'
+                        : '2px solid rgba(130, 149, 184, 0.45)',
+                    borderLeft: flatDateSort
+                        ? '6px solid var(--accent)'
+                        : '6px solid rgba(130, 149, 184, 0.75)',
+                    boxShadow: flatDateSort
+                        ? '0 0 0 3px var(--accent-soft), 0 6px 25px var(--accent-glow)'
+                        : '0 0 0 1px rgba(130, 149, 184, 0.15), 0 2px 10px rgba(0, 0, 0, 0.10)',
                     transition: 'all 0.25s ease',
                     position: 'relative'
                 }}>
-                    {/* Top Mode Badge */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem' }}>
+                    {/* Top Mode Demarcation Badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                         <span style={{
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.35rem',
-                            padding: '0.2rem 0.6rem',
+                            padding: '0.22rem 0.65rem',
                             borderRadius: '20px',
                             fontSize: '0.72rem',
                             fontWeight: 700,
                             letterSpacing: '0.5px',
                             textTransform: 'uppercase',
                             background: flatDateSort ? 'var(--accent-gradient)' : 'var(--surface-solid)',
-                            color: flatDateSort ? 'var(--on-accent)' : 'var(--text-muted)',
-                            border: flatDateSort ? 'none' : '1px solid var(--border)',
+                            color: flatDateSort ? 'var(--on-accent)' : 'var(--text-primary)',
+                            border: flatDateSort ? 'none' : '1px solid rgba(130, 149, 184, 0.40)',
                             boxShadow: flatDateSort ? '0 1px 8px var(--accent-glow)' : 'none'
                         }}>
-                            <Zap size={11} />
-                            {flatDateSort ? 'Flat Mode Active • Zero AI Tokens' : 'Alternative Pipeline'}
+                            <Zap size={11} style={{ color: flatDateSort ? 'var(--on-accent)' : 'var(--accent)' }} />
+                            {flatDateSort ? 'Flat Mode Active • Zero AI Tokens' : 'Alternative Pipeline • Zero AI Tokens'}
                         </span>
-                        {flatDateSort && (
-                            <span style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <Check size={13} /> Schema-Free
-                            </span>
-                        )}
+                        <span style={{
+                            fontSize: '0.72rem',
+                            color: flatDateSort ? 'var(--success)' : 'var(--text-muted)',
+                            fontWeight: 600,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '10px',
+                            background: flatDateSort ? 'var(--success-soft)' : 'var(--surface-solid)',
+                            border: '1px solid var(--border)'
+                        }}>
+                            {flatDateSort ? (
+                                <>
+                                    <Check size={13} strokeWidth={2.5} />
+                                    <span>Schema-Free Mode</span>
+                                </>
+                            ) : (
+                                <span>Bypasses Folders &amp; AI Schema</span>
+                            )}
+                        </span>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -715,13 +760,13 @@ export default function Organizer() {
                     </div>
 
                     {flatDateSort && (
-                        <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                        <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(130, 149, 184, 0.25)' }}>
                             <div style={{
                                 marginBottom: '1rem',
-                                padding: '0.75rem 0.9rem',
+                                padding: '0.85rem 1rem',
                                 borderRadius: '8px',
                                 background: 'var(--surface-solid)',
-                                border: '1px solid var(--border)',
+                                border: '1px solid rgba(130, 149, 184, 0.35)',
                                 fontSize: '0.8rem',
                                 color: 'var(--text-secondary)',
                                 lineHeight: '1.45'
@@ -739,7 +784,7 @@ export default function Organizer() {
                             <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: '600' }}>
                                 Chronological Direction
                             </label>
-                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.35rem', background: 'var(--surface-solid)', borderRadius: '8px', border: '1px solid rgba(130, 149, 184, 0.35)' }}>
                                 <button
                                     type="button"
                                     onClick={() => handleDateSortOrderChange('desc')}
@@ -796,6 +841,28 @@ export default function Organizer() {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* AI Folder Pipeline Demarcation Divider */}
+            {status === 'idle' && !flatDateSort && (
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    margin: '0.5rem 0 1.25rem 0'
+                }}>
+                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                    <span style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.75px',
+                        textTransform: 'uppercase',
+                        color: 'var(--text-muted)'
+                    }}>
+                        AI Folder Pipeline Settings
+                    </span>
+                    <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
                 </div>
             )}
 
