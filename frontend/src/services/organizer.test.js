@@ -1,10 +1,81 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan } from './organizer'
+import { removeDuplicateUrls, checkUrlReachable, filterReachableBookmarks, OrganizerService, getBookmarkTimestamp, getBookmarkDomain, calculateDateSpan, buildUrlIndex, dedupeFromIndex } from './organizer'
 import * as ai from './ai'
 import { classifyBatch, generateSchema, withRetry, geminiModelId, isNetworkError, isRateLimitError, isRetryableError } from './ai'
 import * as bookmarksExport from './bookmarks_export'
 import * as bookmarksService from './bookmarks'
 import { DEFAULT_CATEGORIES, SUGGESTED_ADDABLE_CATEGORIES, SCHEMA_SORT_OPTIONS } from '../components/Organizer'
+
+class FakeBookmarkStore {
+    constructor() {
+        this.nodes = new Map();   // id -> {id, parentId, title, url?, dateAdded?, children?: []}
+        this.ops = [];
+        const root = { id: '0', parentId: null, title: 'root', children: [] };
+        const bar = { id: '1', parentId: '0', title: 'Bookmarks Bar', children: [] };
+        const other = { id: '2', parentId: '0', title: 'Other Bookmarks', children: [] };
+        root.children.push(bar, other);
+        for (const n of [root, bar, other]) this.nodes.set(n.id, n);
+    }
+    rootTree() {
+        const root = this.nodes.get('0');
+        return [root];
+    }
+    node(id) { return this.nodes.get(String(id)); }
+    addFolder(parentId, id, title) {
+        const folder = { id: String(id), parentId: String(parentId), title, children: [] };
+        this.nodes.set(folder.id, folder);
+        this.node(parentId).children.push(folder);
+        return folder;
+    }
+    addUrl(parentId, id, url, title, dateAdded) {
+        const node = { id: String(id), parentId: String(parentId), title, url, dateAdded };
+        this.nodes.set(node.id, node);
+        this.node(parentId).children.push(node);
+        return node;
+    }
+    move(id, destination) {
+        this.ops.push(['move', String(id), destination]);
+        const node = this.node(id);
+        if (!node) return Promise.reject(new Error(`node ${id} not found`));
+        const oldParent = this.node(node.parentId);
+        oldParent.children = oldParent.children.filter(c => c.id !== node.id);
+        node.parentId = destination.parentId;
+        const newParent = this.node(destination.parentId);
+        if (!newParent) return Promise.reject(new Error(`parent ${destination.parentId} not found`));
+        const index = typeof destination.index === 'number' ? destination.index : newParent.children.length;
+        newParent.children.splice(Math.min(index, newParent.children.length), 0, node);
+        return Promise.resolve(node);
+    }
+    remove(id) {
+        this.ops.push(['remove', String(id)]);
+        const node = this.node(id);
+        if (!node) return Promise.reject(new Error(`node ${id} not found`));
+        this.node(node.parentId).children = this.node(node.parentId).children.filter(c => c.id !== node.id);
+        this.nodes.delete(String(id));
+        return Promise.resolve();
+    }
+    childrenOf(parentId) {
+        return Promise.resolve([...(this.node(parentId)?.children || [])]);
+    }
+}
+
+const wireStore = (store) => {
+    vi.spyOn(bookmarksService, 'moveBookmark').mockImplementation((id, dest) => store.move(id, dest));
+    vi.spyOn(bookmarksService, 'removeBookmark').mockImplementation((id) => store.remove(id));
+    vi.spyOn(bookmarksService, 'getBookmarkChildren').mockImplementation((pid) => store.childrenOf(pid));
+};
+
+describe('FakeBookmarkStore', () => {
+    it('FakeBookmarkStore move splices children and preserves dateAdded', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addFolder('2', 'f1', 'Target')
+        await store.move('10', { parentId: 'f1' })
+        expect(store.node('10').parentId).toBe('f1')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+        expect(store.childrenOf('1')).resolves.toHaveLength(0)
+    })
+})
 
 describe('removeDuplicateUrls', () => {
     it('keeps the first bookmark for each exact URL', () => {
@@ -18,6 +89,35 @@ describe('removeDuplicateUrls', () => {
             { title: 'First', url: 'https://example.com' },
             { title: 'Different', url: 'https://example.com/page' }
         ])
+    })
+})
+
+describe('buildUrlIndex and dedupeFromIndex', () => {
+    const links = [
+        { id: '10', url: 'https://a.com', title: 'A old',  dateAdded: 1500000000000 },
+        { id: '11', url: 'https://a.com', title: 'A new',  dateAdded: 1700000000000 },
+        { id: '9',  url: 'https://a.com', title: 'A tie',  dateAdded: 1500000000000 },
+        { id: '20', url: 'https://b.com', title: 'B',      dateAdded: 1600000000000 }
+    ]
+
+    it('groups nodes by exact URL sorted oldest-first with numeric-id tie-break', () => {
+        const index = buildUrlIndex(links)
+        expect(index.get('https://a.com').map(g => g.id)).toEqual(['9', '10', '11'])
+        expect(index.get('https://b.com').map(g => g.id)).toEqual(['20'])
+    })
+
+    it('keeps the group head as survivor and dooms the rest', () => {
+        const { survivors, doomed, duplicatesRemoved } = dedupeFromIndex(links, buildUrlIndex(links))
+        expect(survivors.map(l => l.id)).toEqual(['9', '20'])
+        expect(doomed.map(l => l.id).sort()).toEqual(['10', '11'])
+        expect(duplicatesRemoved).toBe(2)
+    })
+
+    it('keeps id-less entries as survivors (defensive: non-browser input)', () => {
+        const idless = [{ url: 'https://a.com', title: 'no id', dateAdded: 1 }]
+        const { survivors, doomed } = dedupeFromIndex(idless, buildUrlIndex(idless))
+        expect(survivors).toHaveLength(1)
+        expect(doomed).toHaveLength(0)
     })
 })
 
@@ -1187,57 +1287,86 @@ describe('OrganizerService flat chronological date sorting', () => {
         expect(results.map(b => b.url)).toEqual(['https://unique.com', 'https://example.com'])
     })
 
-    it('saves directly to a single chronological browser folder when in browser mode', async () => {
-        const browserTree = [
-            {
-                id: '1',
-                title: 'Bookmarks Bar',
-                children: [
-                    { id: '10', title: 'Older Link', url: 'https://older.com', dateAdded: 1500000000000 },
-                    { id: '11', title: 'Newer Link', url: 'https://newer.com', dateAdded: 1700000000000 }
-                ]
-            }
-        ]
-
-        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(browserTree)
-        const mockFolder = { id: 'chron-root-123', title: 'Chronological Bookmarks' }
-        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue(mockFolder)
-        const createdBookmarks = []
-        vi.spyOn(bookmarksService, 'createBookmark').mockImplementation(async (parentId, title, url) => {
-            createdBookmarks.push({ parentId, title, url })
-            return { id: `bm-${createdBookmarks.length}`, parentId, title, url }
-        })
+    it('moves existing browser nodes into the chronological folder instead of creating copies', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks-2026-09-05')
+        store.addUrl('1', '10', 'https://older.com', 'Older Link', 1500000000000)
+        store.addUrl('1', '11', 'https://newer.com', 'Newer Link', 1700000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        vi.spyOn(bookmarksService, 'createBookmark')
+        wireStore(store)
 
         const service = new OrganizerService(
-            'test-key',
-            ['Tech'],
-            () => {},
-            'google/gemini-3.1-flash-lite',
-            '5-10',
-            true,
-            true,
-            false,
-            true, // flatDateSort
-            'desc' // newest first
+            'test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite',
+            '5-10', true, true, false,
+            true,  // flatDateSort
+            'desc'
         )
+        service.snapshotProvider = async () => {} // replaced by the real seam in Task 7; no-op keeps this test focused
 
-        // Null fileBookmarks triggers browser mode
         const results = await service.start(null)
 
         expect(results.map(b => b.title)).toEqual(['Newer Link', 'Older Link'])
-        expect(bookmarksService.findOrCreateFolder).toHaveBeenCalledWith('2', expect.stringContaining('Chronological Bookmarks'))
-        expect(createdBookmarks).toHaveLength(2)
-        expect(createdBookmarks[0]).toEqual({
-            parentId: 'chron-root-123',
-            title: 'Newer Link',
-            url: 'https://newer.com'
+        expect(bookmarksService.createBookmark).not.toHaveBeenCalled()
+        expect(store.node('10').parentId).toBe('chron-root-123')
+        expect(store.node('11').parentId).toBe('chron-root-123')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+    })
+
+    it('collapses duplicate URLs by moving the oldest node and removing the rest', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://dupe.com', 'Dupe original', 1500000000000)
+        store.addUrl('2', '12', 'https://dupe.com', 'Dupe mid', 1600000000000)
+        store.addUrl('1', '13', 'https://dupe.com', 'Dupe newest', 1700000000000)
+        store.addUrl('1', '14', 'https://unique.com', 'Unique', 1650000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+
+        const service = new OrganizerService(
+            'test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite',
+            '5-10', true, true, false,
+            true, 'desc'
+        )
+        service.snapshotProvider = async () => {}
+
+        const results = await service.start(null)
+
+        expect(service.stats.duplicatesRemoved).toBe(2)
+        expect(store.node('12')).toBeUndefined()
+        expect(store.node('13')).toBeUndefined()
+        expect(store.node('10')).toBeDefined()
+        expect(store.node('10').parentId).toBe('chron-root-123')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+        expect(results.map(b => b.url).sort()).toEqual(['https://dupe.com', 'https://unique.com'])
+    })
+
+    it('post-write cancellation reports a partially reorganized state', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        for (let i = 0; i < 40; i++) {
+            store.addUrl('1', String(100 + i), `https://site-${i}.com`, `Site ${i}`, 1500000000000 + i * 1000)
+        }
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        // Throttle moves so cancel lands mid-write:
+        let moves = 0
+        bookmarksService.moveBookmark.mockImplementation(async (id, dest) => {
+            if (++moves === 20) service.cancel()
+            return store.move(id, dest)
         })
-        expect(createdBookmarks[1]).toEqual({
-            parentId: 'chron-root-123',
-            title: 'Older Link',
-            url: 'https://older.com'
-        })
-        expect(bookmarksExport.downloadBookmarks).not.toHaveBeenCalled()
+
+        const messages = []
+        const service = new OrganizerService('test-key', ['Tech'], (d) => messages.push(d.message), 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).toBeNull()
+        expect(messages.some(m => m.includes('partially reorganized'))).toBe(true)
+        expect(messages.some(m => m.includes('Run again to finish'))).toBe(true)
     })
 })
 
@@ -1703,5 +1832,180 @@ describe('schema fallback path reporting', () => {
         expect(events.some(e => e.status === 'error')).toBe(false)
         // M3: the shape of the degraded structure is logged here too.
         expect(messages.filter(m => m.startsWith('Schema:'))).toHaveLength(1)
+    })
+})
+
+describe('categorized browser write moves and isolates failures', () => {
+    const arrangeCategorized = (store) => {
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'createBookmark')
+        vi.spyOn(ai, 'generateSchema').mockResolvedValue({ categories: [{ name: 'Tech', sub_categories: [] }] })
+        vi.spyOn(ai, 'classifyBatch').mockImplementation(async (batch) => batch.map(b => ({ ...b, category: 'Tech', sub_category: 'General' })))
+        wireStore(store)
+    }
+
+    it('categorized browser mode moves nodes into category folders, keeping dates', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockImplementation(async (parentId, title) => {
+            const found = [...store.nodes.values()].find(n => n.parentId === parentId && n.title === title && !n.url)
+            if (found) return found
+            const id = `folder-${title}`
+            return store.addFolder(parentId, id, title)
+        })
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(bookmarksService.createBookmark).not.toHaveBeenCalled()
+        expect(store.node('10').parentId).toBe('folder-Tech')
+        expect(store.node('10').dateAdded).toBe(1500000000000)
+    })
+
+    it('a category-folder failure fails only that item and records it', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        // First call creates the root; the category folder then fails.
+        vi.spyOn(bookmarksService, 'findOrCreateFolder')
+            .mockResolvedValueOnce(store.addFolder('2', 'org-root-1', 'AI Organized Bookmarks-2026-09-05'))
+            .mockRejectedValue(new Error('quota exceeded'))
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(service.failedMoves).toEqual([{ title: 'A', reason: 'quota exceeded' }])
+        expect(store.node('10').parentId).toBe('1') // untouched
+    })
+
+    it('a failed move records failedMoves but does not abort the run', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addUrl('1', '11', 'https://b.com', 'B', 1600000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockImplementation(async (parentId, title) => {
+            const found = [...store.nodes.values()].find(n => n.parentId === parentId && n.title === title && !n.url)
+            if (found) return found
+            const id = `folder-${title}`
+            return store.addFolder(parentId, id, title)
+        })
+        bookmarksService.moveBookmark.mockImplementation(async (id, dest) => {
+            if (id === '10') throw new Error('node not found')
+            return store.move(id, dest)
+        })
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).not.toBeNull()
+        expect(service.failedMoves).toEqual([{ title: 'A', reason: 'node not found' }])
+        expect(store.node('11').parentId).toBe('folder-Tech') // the healthy sibling still moved
+        expect(store.node('10').parentId).toBe('1')
+    })
+
+    it('reports failedMoves in stats and logs the count', async () => {
+        const logs = []
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder')
+            .mockResolvedValueOnce(store.addFolder('2', 'org-root-1', 'AI Organized Bookmarks-2026-09-05'))
+            .mockRejectedValue(new Error('quota exceeded'))
+
+        const service = new OrganizerService('test-key', ['Tech'], (d) => d.message && logs.push(d.message), 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        await service.start(null)
+
+        expect(service.stats.failedMoves).toEqual([{ title: 'A', reason: 'quota exceeded' }])
+        expect(logs.some(m => m.includes('1 move failed'))).toBe(true)
+    })
+})
+
+describe('Phase B reorder pass and idempotency', () => {
+    it('reorders only misplaced nodes in a folder', async () => {
+        const store = new FakeBookmarkStore()
+        // children in wrong order: 12, 10, 11; expected: 10, 11, 12
+        store.addFolder('2', 'f1', 'Folder')
+        store.addUrl('f1', '12', 'https://c.com', 'C', 1700000000000)
+        store.addUrl('f1', '10', 'https://a.com', 'A', 1500000000000)
+        store.addUrl('f1', '11', 'https://b.com', 'B', 1600000000000)
+        wireStore(store)
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite')
+        await service.reorderFolder('f1', ['10', '11', '12'])
+
+        const childIds = (await store.childrenOf('f1')).map(c => c.id)
+        expect(childIds).toEqual(['10', '11', '12'])
+        expect(store.ops.filter(([op]) => op === 'move')).toHaveLength(2) // 10 and 11 moved; 12 already home
+    })
+
+    it('a second identical organize run issues zero moves and zero removes (idempotency)', async () => {
+        // Same arrangement as Task 4's move test, run twice:
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://older.com', 'Older Link', 1500000000000)
+        store.addUrl('1', '11', 'https://newer.com', 'Newer Link', 1700000000000)
+        // rootTree() wraps the LIVE root node, so run 2 reads run 1's mutations
+        // through this same mock — no fixture rebuild, and never re-add the folder.
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => {} // installed for real in Task 7
+
+        await service.start(null)
+        const opsAfterFirst = store.ops.length
+        expect(opsAfterFirst).toBeGreaterThan(0)
+
+        const service2 = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service2.snapshotProvider = async () => {}
+        await service2.start(null)
+
+        expect(store.ops.slice(opsAfterFirst)).toEqual([]) // zero ops on the second run
+    })
+})
+
+describe('pre-write snapshot gate (mandatory before browser mutation)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks()
+    })
+
+    it('browser mode snapshots survivors plus doomed duplicates before any mutation', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://dupe.com', 'Dupe original', 1500000000000)
+        store.addUrl('2', '12', 'https://dupe.com', 'Dupe mid', 1600000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        const downloadSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        await service.start(null)
+
+        expect(downloadSpy).toHaveBeenCalledTimes(1)
+        const [exported, filename] = downloadSpy.mock.calls[0]
+        expect(exported.map(b => b.id).sort()).toEqual(['10', '12']) // survivor + doomed, both present
+        expect(filename).toBeUndefined() // exporter default: organized_bookmarks.html (spec §8)
+    })
+
+    it('refuses to mutate when the snapshot provider throws', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        wireStore(store)
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => { throw new Error('disk full') }
+        const results = await service.start(null)
+
+        expect(results).toBeNull()
+        expect(store.ops).toEqual([]) // zero mutations
     })
 })
