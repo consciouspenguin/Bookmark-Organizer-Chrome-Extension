@@ -633,7 +633,7 @@ export class OrganizerService {
             }
 
             if (this.isCancelled) {
-                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                this.onProgress({ status: 'warning', message: 'Cancelled — bookmarks partially reorganized. Run again to finish.' });
                 return null;
             }
 
@@ -1012,7 +1012,7 @@ export class OrganizerService {
         }
 
         if (this.isCancelled) {
-            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+            this.onProgress({ status: 'warning', message: 'Cancelled — bookmarks partially reorganized. Run again to finish.' });
             return null;
         }
 

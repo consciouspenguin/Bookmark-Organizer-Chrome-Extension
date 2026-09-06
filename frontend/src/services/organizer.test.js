@@ -1342,6 +1342,32 @@ describe('OrganizerService flat chronological date sorting', () => {
         expect(store.node('10').dateAdded).toBe(1500000000000)
         expect(results.map(b => b.url).sort()).toEqual(['https://dupe.com', 'https://unique.com'])
     })
+
+    it('post-write cancellation reports a partially reorganized state', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        for (let i = 0; i < 40; i++) {
+            store.addUrl('1', String(100 + i), `https://site-${i}.com`, `Site ${i}`, 1500000000000 + i * 1000)
+        }
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        // Throttle moves so cancel lands mid-write:
+        let moves = 0
+        bookmarksService.moveBookmark.mockImplementation(async (id, dest) => {
+            if (++moves === 20) service.cancel()
+            return store.move(id, dest)
+        })
+
+        const messages = []
+        const service = new OrganizerService('test-key', ['Tech'], (d) => messages.push(d.message), 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => {}
+        const results = await service.start(null)
+
+        expect(results).toBeNull()
+        expect(messages.some(m => m.includes('partially reorganized'))).toBe(true)
+        expect(messages.some(m => m.includes('Run again to finish'))).toBe(true)
+    })
 })
 
 describe('Category Presets and Suggestions', () => {
