@@ -1,0 +1,50 @@
+{
+    "manifest_version": 3,
+    "name": "AI Bookmark Organizer",
+    "version": "1.2.1",
+    "description": "Organize your bookmarks using AI with Google Gemini.",
+    "permissions": [
+        "storage",
+        "bookmarks",
+        "downloads",
+        "notifications"
+    ],
+    "host_permissions": [
+        "https://openrouter.ai/*",
+        "https://generativelanguage.googleapis.com/*"
+    ],
+    "action": {
+        "default_title": "Organize Bookmarks",
+        "default_icon": {
+            "16": "icon16.png",
+            "32": "icon32.png"
+        }
+    },
+    "sidebar_action": {
+        "default_panel": "index.html",
+        "default_title": "Organize Bookmarks",
+        "default_icon": {
+            "16": "icon16.png",
+            "32": "icon32.png"
+        }
+    },
+    "icons": {
+        "16": "icon16.png",
+        "32": "icon32.png",
+        "48": "icon48.png",
+        "64": "icon64.png",
+        "128": "icon128.png"
+    },
+    "background": {
+        "scripts": [
+            "background.js"
+        ],
+        "type": "module"
+    },
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "bookmark-organizer@consciouspenguin.com",
+            "strict_min_version": "115.0"
+        }
+    }
+}

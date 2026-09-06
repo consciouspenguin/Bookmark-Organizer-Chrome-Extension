@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:chrome": "vite build",
+    "build:firefox": "TARGET_BROWSER=firefox vite build",
+    "package:firefox": "npm run build:firefox && node scripts/package-firefox.js",
     "lint": "eslint .",
     "test": "vitest run",
     "preview": "vite preview"
