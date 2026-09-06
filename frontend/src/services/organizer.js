@@ -1,4 +1,4 @@
-import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, getOtherBookmarksRootId } from './bookmarks';
+import { getBookmarks, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, moveBookmark, removeBookmark, getBookmarkChildren, getOtherBookmarksRootId } from './bookmarks';
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 import { reconcileSubcategories } from './reconcile';
@@ -77,6 +77,36 @@ export function removeDuplicateUrls(bookmarks) {
         seenUrls.add(bookmark.url);
         return true;
     });
+}
+
+// Browser-mode provenance index (spec §7): exact-URL groups, oldest dateAdded wins,
+// numeric id breaks ties. Survivor = group head; everything else is a doomed duplicate.
+export function buildUrlIndex(links) {
+    const index = new Map();
+    for (const link of links) {
+        if (!link.url) continue;
+        if (!index.has(link.url)) index.set(link.url, []);
+        index.get(link.url).push({ id: link.id, dateAdded: link.dateAdded || 0 });
+    }
+    for (const group of index.values()) {
+        group.sort((a, b) => (a.dateAdded - b.dateAdded) || (Number(a.id) - Number(b.id)));
+    }
+    return index;
+}
+
+export function dedupeFromIndex(links, urlIndex) {
+    const survivorIds = new Set();
+    for (const group of urlIndex.values()) {
+        if (group.length > 0 && group[0].id !== undefined) survivorIds.add(String(group[0].id));
+    }
+    const survivors = [];
+    const doomed = [];
+    for (const link of links) {
+        if (link.id === undefined) { survivors.push(link); continue; }
+        if (survivorIds.has(String(link.id))) survivors.push(link);
+        else doomed.push(link);
+    }
+    return { survivors, doomed, duplicatesRemoved: doomed.length };
 }
 
 export { getBookmarkTimestamp, calculateDateSpan } from '../utils/dates';
@@ -171,12 +201,94 @@ export class OrganizerService {
             isFlat: flatDateSort,
             dateSortOrder,
             schemaSortOrder: this.schemaSortOrder,
-            dateSpan: null
+            dateSpan: null,
+            failedMoves: []
         };
+        this.failedMoves = [];
+        this.snapshotProvider = null;
     }
 
     cancel() {
         this.isCancelled = true;
+    }
+
+    async moveItems(pairs) {
+        const WRITE_CHUNK_SIZE = 15;
+        for (let i = 0; i < pairs.length; i += WRITE_CHUNK_SIZE) {
+            if (this.isCancelled) break;
+            const chunk = pairs.slice(i, i + WRITE_CHUNK_SIZE);
+            await Promise.all(chunk.map(({ item, parentId }) => this.safeMove(item, parentId)));
+        }
+    }
+
+    async safeMove(item, parentId) {
+        if (this.isCancelled) return;
+        if (item.id === undefined) {
+            this.failedMoves.push({ title: item.title, reason: 'bookmark node id missing' });
+            return;
+        }
+        if (item.parentId === parentId) return; // already home — keeps re-runs idempotent (G4)
+        try {
+            await moveBookmark(item.id, { parentId });
+        } catch (err) {
+            this.failedMoves.push({ title: item.title, reason: err?.message || String(err) });
+        }
+    }
+
+    async removeDoomedDuplicates() {
+        for (const node of this.doomedDuplicates || []) {
+            if (this.isCancelled) break;
+            try {
+                await removeBookmark(String(node.id));
+            } catch (err) {
+                this.failedMoves.push({ title: node.title, reason: `duplicate remove failed: ${err?.message || err}` });
+            }
+        }
+    }
+
+    // Phase B: after every node is home, restore the expected order within
+    // each folder by moving ONLY the nodes that are misplaced (spec G4).
+    async reorderFolder(parentId, expectedIds) {
+        if (this.isCancelled || expectedIds.length === 0) return;
+        let children;
+        try {
+            children = await getBookmarkChildren(parentId);
+        } catch {
+            return;
+        }
+        const order = children.map(c => String(c.id));
+        for (let i = 0; i < expectedIds.length; i++) {
+            const want = String(expectedIds[i]);
+            if (order[i] === want) continue;
+            const pos = order.indexOf(want);
+            if (pos === -1) continue;
+            try {
+                await moveBookmark(want, { parentId, index: i });
+                order.splice(pos, 1);
+                order.splice(i, 0, want);
+            } catch (err) {
+                this.failedMoves.push({ title: want, reason: `reorder failed: ${err?.message || err}` });
+            }
+        }
+    }
+
+    async prepareSnapshot(survivors, doomedDuplicates) {
+        if (!this.snapshotProvider) {
+            const { downloadBookmarks } = await import('./bookmarks_export');
+            this.snapshotProvider = async (surv, doomed) => {
+                // No filename: the exporter keeps its organized_bookmarks.html default (spec §8).
+                // saveAs: false — a Save-As dialog on every organize run would be hostile.
+                downloadBookmarks([...surv, ...doomed], undefined, { saveAs: false });
+            };
+        }
+        this.onProgress({ status: 'info', message: 'Saving a backup before touching your bookmarks (restores content and dates, not the previous folder layout)...' });
+        try {
+            await this.snapshotProvider(survivors, doomedDuplicates);
+            return true;
+        } catch (err) {
+            this.onProgress({ status: 'error', message: `Backup failed — organize cancelled before touching your bookmarks. (${err?.message || err})` });
+            return false;
+        }
     }
 
     async classifyWithSubdivision(batchData, schema, label = '') {
@@ -338,6 +450,7 @@ export class OrganizerService {
                                 title: node.title,
                                 url: node.url,
                                 id: node.id,
+                                parentId: node.parentId,
                                 dateAdded: node.dateAdded,
                                 add_date: node.dateAdded ? String(Math.floor(node.dateAdded / 1000)) : undefined
                             });
@@ -368,7 +481,21 @@ export class OrganizerService {
         }
 
         let duplicatesRemoved = 0;
-        if (this.removeDuplicates) {
+        this.doomedDuplicates = [];
+        const isBrowserMode = !fileBookmarks;
+        if (this.removeDuplicates && isBrowserMode) {
+            const urlIndex = buildUrlIndex(allLinks);
+            const dedup = dedupeFromIndex(allLinks, urlIndex);
+            allLinks = dedup.survivors;
+            this.doomedDuplicates = dedup.doomed;
+            duplicatesRemoved = dedup.duplicatesRemoved;
+            this.onProgress({
+                status: 'info',
+                message: duplicatesRemoved > 0
+                    ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
+                    : 'No duplicate URLs found.'
+            });
+        } else if (this.removeDuplicates) {
             const originalCount = allLinks.length;
             allLinks = removeDuplicateUrls(allLinks);
             duplicatesRemoved = originalCount - allLinks.length;
@@ -378,6 +505,8 @@ export class OrganizerService {
                     ? `Removed ${duplicatesRemoved} duplicate URL${duplicatesRemoved === 1 ? '' : 's'} from the organized result.`
                     : 'No duplicate URLs found.'
             });
+        }
+        if (duplicatesRemoved > 0) {
             const postDupeSpan = calculateDateSpan(allLinks);
             if (postDupeSpan && postDupeSpan !== this.dateSpan) {
                 this.dateSpan = postDupeSpan;
@@ -482,7 +611,8 @@ export class OrganizerService {
                 categoryBreakdown: {},
                 isFlat: true,
                 dateSortOrder: this.dateSortOrder,
-                dateSpan
+                dateSpan,
+                failedMoves: this.failedMoves
             };
             finalResults.stats = this.stats;
 
@@ -491,21 +621,25 @@ export class OrganizerService {
                 downloadBookmarks(finalResults);
             } else {
                 this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} chronological bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
+                if (!await this.prepareSnapshot(finalResults, this.doomedDuplicates || [])) return null;
                 const rootId = await getOtherBookmarksRootId();
                 const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
                 const rootFolder = await findOrCreateFolder(rootId, folderTitle);
+                clearFolderCache();
 
-                const WRITE_CHUNK_SIZE = 15;
-                for (let i = 0; i < finalResults.length; i += WRITE_CHUNK_SIZE) {
-                    if (this.isCancelled) break;
-                    const chunk = finalResults.slice(i, i + WRITE_CHUNK_SIZE);
-                    await Promise.all(chunk.map(b => createBookmark(rootFolder.id, b.title, b.url)));
-                }
+                await this.moveItems(finalResults.map(item => ({ item, parentId: rootFolder.id })));
+                await this.removeDoomedDuplicates();
+                await this.reorderFolder(rootFolder.id, finalResults.map(r => r.id));
             }
 
             if (this.isCancelled) {
-                this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+                this.onProgress({ status: 'warning', message: 'Cancelled — bookmarks partially reorganized. Run again to finish.' });
                 return null;
+            }
+
+            if (this.failedMoves.length > 0) {
+                const n = this.failedMoves.length;
+                this.onProgress({ status: 'warning', message: `${n} move${n === 1 ? '' : 's'} failed and need${n === 1 ? 's' : ''} another run: ${this.failedMoves.map(f => f.title).slice(0, 5).join(', ')}${n > 5 ? '…' : ''}` });
             }
 
             this.onProgress({ status: 'done', message: 'Organization complete!' });
@@ -818,62 +952,67 @@ export class OrganizerService {
                 console.warn('[Organizer] Download invocation deferred:', dlErr);
             }
         } else {
-            // Browser mode: Save bookmarks to Chrome
-            this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
-            
+            // Browser mode: relocate existing bookmarks (spec §6)
+            this.onProgress({ status: 'info', message: `Reorganizing ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} in the browser...`, dateSpan });
+            if (!await this.prepareSnapshot(finalResults, this.doomedDuplicates || [])) return null;
             const rootId = await getOtherBookmarksRootId(); // 'Other Bookmarks' (Chrome: '2', Firefox: 'unfiled_____')
             const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
-
-            // Clean up the folder cache before starting the write operation
             clearFolderCache();
 
-            // To avoid duplicate folder creation and empty folders:
             const createdFolders = {}; // path key -> folder Object
             const itemsWithParents = [];
 
             for (const item of finalResults) {
                 if (this.isCancelled) break;
-                
+
                 const category = item.category || "Uncategorized";
-                
-                // Find or create category folder
-                let catFolder;
-                if (createdFolders[category]) {
-                    catFolder = createdFolders[category];
-                } else {
-                    catFolder = await findOrCreateFolder(rootFolder.id, category);
-                    createdFolders[category] = catFolder;
-                }
-                
-                let targetParentId = catFolder.id;
-                
-                const subCategory = item.sub_category;
-                if (shouldCreateSubFolder(category, subCategory)) {
-                    const subPath = `${category}/${subCategory}`;
-                    let subFolder;
-                    if (createdFolders[subPath]) {
-                        subFolder = createdFolders[subPath];
+                let targetParentId;
+                try {
+                    let catFolder;
+                    if (createdFolders[category]) {
+                        catFolder = createdFolders[category];
                     } else {
-                        subFolder = await findOrCreateFolder(catFolder.id, subCategory);
-                        createdFolders[subPath] = subFolder;
+                        catFolder = await findOrCreateFolder(rootFolder.id, category);
+                        createdFolders[category] = catFolder;
                     }
-                    targetParentId = subFolder.id;
+
+                    targetParentId = catFolder.id;
+
+                    const subCategory = item.sub_category;
+                    if (shouldCreateSubFolder(category, subCategory)) {
+                        const subPath = `${category}/${subCategory}`;
+                        let subFolder;
+                        if (createdFolders[subPath]) {
+                            subFolder = createdFolders[subPath];
+                        } else {
+                            subFolder = await findOrCreateFolder(catFolder.id, subCategory);
+                            createdFolders[subPath] = subFolder;
+                        }
+                        targetParentId = subFolder.id;
+                    }
+                } catch (err) {
+                    this.failedMoves.push({ title: item.title, reason: err?.message || String(err) });
+                    continue;
                 }
-                
-                itemsWithParents.push({ parentId: targetParentId, title: item.title, url: item.url });
+
+                itemsWithParents.push({ item, parentId: targetParentId });
             }
 
-            // High-speed pipelined creation in chunks of 15 promises
-            const WRITE_CHUNK_SIZE = 15;
-            for (let i = 0; i < itemsWithParents.length; i += WRITE_CHUNK_SIZE) {
-                if (this.isCancelled) break;
-                const chunk = itemsWithParents.slice(i, i + WRITE_CHUNK_SIZE);
-                await Promise.all(chunk.map(b => createBookmark(b.parentId, b.title, b.url)));
+            await this.moveItems(itemsWithParents);
+            await this.removeDoomedDuplicates();
+
+            const byFolder = new Map();
+            for (const { item, parentId } of itemsWithParents) {
+                if (!byFolder.has(parentId)) byFolder.set(parentId, []);
+                byFolder.get(parentId).push(item.id);
+            }
+            for (const [parentId, expectedIds] of byFolder) {
+                await this.reorderFolder(parentId, expectedIds);
             }
         }
 
         if (this.isCancelled) {
-            this.onProgress({ status: 'warning', message: 'Process cancelled.' });
+            this.onProgress({ status: 'warning', message: 'Cancelled — bookmarks partially reorganized. Run again to finish.' });
             return null;
         }
 
@@ -898,7 +1037,8 @@ export class OrganizerService {
             categoryBreakdown,
             isFlat: false,
             schemaSortOrder: this.schemaSortOrder,
-            dateSpan
+            dateSpan,
+            failedMoves: this.failedMoves
         };
         finalResults.stats = this.stats;
 
@@ -920,6 +1060,11 @@ export class OrganizerService {
                 ? `${generalShare}% of bookmarks (${generalCount.toLocaleString()}) landed in General — the AI struggled to find distinct subfolders. Try a different model or re-run.`
                 : `Filed directly under their category (General): ${generalCount.toLocaleString()} (${generalShare}%).`
         });
+
+        if (this.failedMoves.length > 0) {
+            const n = this.failedMoves.length;
+            this.onProgress({ status: 'warning', message: `${n} move${n === 1 ? '' : 's'} failed and need${n === 1 ? 's' : ''} another run: ${this.failedMoves.map(f => f.title).slice(0, 5).join(', ')}${n > 5 ? '…' : ''}` });
+        }
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;

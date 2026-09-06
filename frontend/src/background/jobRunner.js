@@ -1,5 +1,6 @@
 import { OrganizerService } from '../services/organizer';
 import { calculateDateSpan } from '../utils/dates';
+import { createStorageSnapshotProvider } from './snapshotProvider';
 
 export class BackgroundJobRunner {
     constructor() {
@@ -206,6 +207,7 @@ export class BackgroundJobRunner {
             dateSortOrder,
             schemaSortOrder
         );
+        this.organizer.snapshotProvider = createStorageSnapshotProvider((msg) => this.addLog(msg));
 
         try {
             const results = await this.organizer.start(parsedBookmarks);

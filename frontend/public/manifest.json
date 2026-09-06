@@ -5,6 +5,7 @@
     "description": "Organize your bookmarks using AI with Google Gemini.",
     "permissions": [
         "storage",
+        "unlimitedStorage",
         "bookmarks",
         "downloads",
         "sidePanel",

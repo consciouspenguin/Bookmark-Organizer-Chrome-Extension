@@ -137,7 +137,8 @@ ${dateSpan ? `     Date range: ${dateSpan}\n` : ''}     It will be read and over
     return html;
 }
 
-export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.html") {
+export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.html", options = {}) {
+    const { saveAs = true } = options;
     const defaultName = bookmarks?.isFlat ? "chronological_bookmarks.html" : "organized_bookmarks.html";
     const actualFilename = filename === "organized_bookmarks.html" ? defaultName : filename;
     const html = generateNetscapeHTML(bookmarks);
@@ -158,7 +159,7 @@ export function downloadBookmarks(bookmarks, filename = "organized_bookmarks.htm
         chrome.downloads.download({
             url: url,
             filename: actualFilename,
-            saveAs: true
+            saveAs: saveAs
         });
     } else if (typeof document !== 'undefined' && document.createElement) {
         const a = document.createElement('a');

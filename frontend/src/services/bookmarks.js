@@ -92,13 +92,37 @@ export async function createBookmark(parentId, title, url) {
     });
 }
 
-export async function moveBookmark(id, parentId) {
+export async function moveBookmark(id, destination) {
     return new Promise((resolve, reject) => {
-        chrome.bookmarks.move(id, { parentId: parentId }, (result) => {
+        chrome.bookmarks.move(id, destination, (result) => {
             if (chrome.runtime.lastError) {
-                reject(chrome.runtime.lastError);
+                reject(new Error(chrome.runtime.lastError.message));
             } else {
                 resolve(result);
+            }
+        });
+    });
+}
+
+export async function removeBookmark(id) {
+    return new Promise((resolve, reject) => {
+        chrome.bookmarks.remove(id, () => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+export async function getBookmarkChildren(parentId) {
+    return new Promise((resolve, reject) => {
+        chrome.bookmarks.getChildren(parentId, (children) => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+            } else {
+                resolve(children || []);
             }
         });
     });
