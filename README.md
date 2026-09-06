@@ -56,8 +56,17 @@ If you are a developer and want to modify the code:
 git clone https://github.com/ne1cc/Bookmark-Organizer-Chrome-Extension.git
 cd Bookmark-Organizer-Chrome-Extension/frontend
 npm install
-npm run build
-# Then load the 'dist' folder in chrome://extensions
+
+# Chrome:
+npm run build:chrome
+# Load the 'dist' folder in chrome://extensions
+
+# Firefox:
+npm run build:firefox
+# Load 'dist/manifest.json' in about:debugging -> This Firefox -> Load Temporary Add-on
+
+# Package for Firefox AMO:
+npm run package:firefox
 ```
 
 ## 🔑 Getting Started

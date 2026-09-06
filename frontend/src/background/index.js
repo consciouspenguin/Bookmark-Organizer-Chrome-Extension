@@ -6,6 +6,19 @@ export function setupSidePanel() {
         chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
             .catch((error) => console.error('Error setting side panel behavior:', error));
     }
+    const browserApi = (typeof browser !== 'undefined' && browser) || (typeof chrome !== 'undefined' && chrome);
+    if (browserApi?.action?.onClicked && browserApi?.sidebarAction?.open) {
+        if (!setupSidePanel._firefoxListenerAttached) {
+            browserApi.action.onClicked.addListener(() => {
+                try {
+                    browserApi.sidebarAction.open();
+                } catch (err) {
+                    console.warn('[Background] Failed to open sidebar on action click:', err);
+                }
+            });
+            setupSidePanel._firefoxListenerAttached = true;
+        }
+    }
 }
 
 // Track active side panel connection ports
@@ -115,11 +128,18 @@ jobRunner.subscribe((event, payload) => {
     }
 });
 
-// Handle clicking on desktop notifications -> open side panel
+// Handle clicking on desktop notifications -> open side panel / sidebar
 if (typeof chrome !== 'undefined' && chrome.notifications?.onClicked) {
     chrome.notifications.onClicked.addListener((notificationId) => {
         if (notificationId.startsWith('organizer-job')) {
-            if (chrome.sidePanel?.open && chrome.windows?.getCurrent) {
+            const browserApi = (typeof browser !== 'undefined' && browser) || chrome;
+            if (browserApi?.sidebarAction?.open) {
+                try {
+                    browserApi.sidebarAction.open();
+                } catch (err) {
+                    console.warn('[Background] Failed to open sidebar on notification click:', err);
+                }
+            } else if (chrome.sidePanel?.open && chrome.windows?.getCurrent) {
                 chrome.windows.getCurrent((win) => {
                     if (win?.id) {
                         chrome.sidePanel.open({ windowId: win.id }).catch((err) => {

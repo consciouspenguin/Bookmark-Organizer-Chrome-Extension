@@ -1,4 +1,4 @@
-import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder } from './bookmarks';
+import { getBookmarks, createBookmark, findOrCreateFolder, clearFolderCache, shouldCreateSubFolder, getOtherBookmarksRootId } from './bookmarks';
 import { generateSchema, classifyBatch, SCHEMA_SAMPLE_LIMIT, isNetworkError, isRateLimitError } from './ai';
 import { downloadBookmarks } from './bookmarks_export';
 import { reconcileSubcategories } from './reconcile';
@@ -491,7 +491,7 @@ export class OrganizerService {
                 downloadBookmarks(finalResults);
             } else {
                 this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} chronological bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
-                const rootId = '2';
+                const rootId = await getOtherBookmarksRootId();
                 const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
                 const rootFolder = await findOrCreateFolder(rootId, folderTitle);
 
@@ -821,7 +821,7 @@ export class OrganizerService {
             // Browser mode: Save bookmarks to Chrome
             this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
             
-            const rootId = '2'; // 'Other Bookmarks' usually
+            const rootId = await getOtherBookmarksRootId(); // 'Other Bookmarks' (Chrome: '2', Firefox: 'unfiled_____')
             const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
 
             // Clean up the folder cache before starting the write operation

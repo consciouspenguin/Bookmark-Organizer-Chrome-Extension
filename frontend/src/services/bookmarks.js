@@ -1,7 +1,49 @@
+function getBookmarksApi() {
+    return (typeof chrome !== 'undefined' && chrome.bookmarks) || (typeof browser !== 'undefined' && browser.bookmarks);
+}
+
+export function detectOtherBookmarksFolderId(tree) {
+    if (!tree || !Array.isArray(tree) || tree.length === 0) return '2';
+    const rootNode = tree[0];
+    const rootChildren = rootNode?.children || tree;
+
+    // 1. Check for Firefox unfiled root
+    const firefoxUnfiled = rootChildren.find(c => c && c.id === 'unfiled_____');
+    if (firefoxUnfiled) return 'unfiled_____';
+
+    // 2. Check for Chrome standard '2'
+    const chromeOther = rootChildren.find(c => c && c.id === '2');
+    if (chromeOther) return '2';
+
+    // 3. Match by title (e.g. "Other Bookmarks", "Unfiled Bookmarks")
+    const titleMatch = rootChildren.find(c => {
+        if (!c || !c.title) return false;
+        const title = c.title.trim().toLowerCase();
+        return title.includes('unfiled') || title.includes('other bookmarks') || title === 'other';
+    });
+    if (titleMatch) return titleMatch.id;
+
+    return '2';
+}
+
+export async function getOtherBookmarksRootId() {
+    try {
+        const tree = await getBookmarks();
+        return detectOtherBookmarksFolderId(tree);
+    } catch {
+        return '2';
+    }
+}
+
 export async function getBookmarks() {
     return new Promise((resolve) => {
-        chrome.bookmarks.getTree((tree) => {
-            resolve(tree);
+        const api = getBookmarksApi();
+        if (!api) {
+            resolve([]);
+            return;
+        }
+        api.getTree((tree) => {
+            resolve(tree || []);
         });
     });
 }

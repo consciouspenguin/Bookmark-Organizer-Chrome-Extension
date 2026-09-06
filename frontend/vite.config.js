@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+const targetBrowser = process.env.TARGET_BROWSER || 'chrome'
 
 // Side panel startup must depend on as few asset fetches as possible:
 // inline the single stylesheet into index.html (MV3 CSP forbids inlining
@@ -24,9 +26,22 @@ const inlineStyles = () => ({
   }
 })
 
+const extensionManifest = (target) => ({
+  name: 'extension-manifest',
+  enforce: 'post',
+  closeBundle() {
+    if (target === 'firefox') {
+      const dir = join(import.meta.dirname, 'dist')
+      const ffManifestPath = join(import.meta.dirname, 'manifests', 'manifest.firefox.json')
+      const targetManifestPath = join(dir, 'manifest.json')
+      copyFileSync(ffManifestPath, targetManifestPath)
+    }
+  }
+})
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), inlineStyles()],
+  plugins: [react(), inlineStyles(), extensionManifest(targetBrowser)],
   base: './', // CRITICAL for extensions
   build: {
     outDir: 'dist',
