@@ -1927,3 +1927,42 @@ describe('Phase B reorder pass and idempotency', () => {
         expect(store.ops.slice(opsAfterFirst)).toEqual([]) // zero ops on the second run
     })
 })
+
+describe('pre-write snapshot gate (mandatory before browser mutation)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks()
+    })
+
+    it('browser mode snapshots survivors plus doomed duplicates before any mutation', async () => {
+        const store = new FakeBookmarkStore()
+        store.addFolder('2', 'chron-root-123', 'Chronological Bookmarks')
+        store.addUrl('1', '10', 'https://dupe.com', 'Dupe original', 1500000000000)
+        store.addUrl('2', '12', 'https://dupe.com', 'Dupe mid', 1600000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        vi.spyOn(bookmarksService, 'findOrCreateFolder').mockResolvedValue({ id: 'chron-root-123', title: 'Chronological Bookmarks' })
+        wireStore(store)
+        const downloadSpy = vi.spyOn(bookmarksExport, 'downloadBookmarks').mockImplementation(() => {})
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        await service.start(null)
+
+        expect(downloadSpy).toHaveBeenCalledTimes(1)
+        const [exported, filename] = downloadSpy.mock.calls[0]
+        expect(exported.map(b => b.id).sort()).toEqual(['10', '12']) // survivor + doomed, both present
+        expect(filename).toBeUndefined() // exporter default: organized_bookmarks.html (spec §8)
+    })
+
+    it('refuses to mutate when the snapshot provider throws', async () => {
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        vi.spyOn(bookmarksService, 'getBookmarks').mockResolvedValue(store.rootTree())
+        wireStore(store)
+
+        const service = new OrganizerService('test-key', ['Tech'], () => {}, 'google/gemini-3.1-flash-lite', '5-10', true, true, false, true, 'desc')
+        service.snapshotProvider = async () => { throw new Error('disk full') }
+        const results = await service.start(null)
+
+        expect(results).toBeNull()
+        expect(store.ops).toEqual([]) // zero mutations
+    })
+})

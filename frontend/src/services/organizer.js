@@ -272,6 +272,25 @@ export class OrganizerService {
         }
     }
 
+    async prepareSnapshot(survivors, doomedDuplicates) {
+        if (!this.snapshotProvider) {
+            const { downloadBookmarks } = await import('./bookmarks_export');
+            this.snapshotProvider = async (surv, doomed) => {
+                // No filename: the exporter keeps its organized_bookmarks.html default (spec §8).
+                // saveAs: false — a Save-As dialog on every organize run would be hostile.
+                downloadBookmarks([...surv, ...doomed], undefined, { saveAs: false });
+            };
+        }
+        this.onProgress({ status: 'info', message: 'Saving a backup before touching your bookmarks (restores content and dates, not the previous folder layout)...' });
+        try {
+            await this.snapshotProvider(survivors, doomedDuplicates);
+            return true;
+        } catch (err) {
+            this.onProgress({ status: 'error', message: `Backup failed — organize cancelled before touching your bookmarks. (${err?.message || err})` });
+            return false;
+        }
+    }
+
     async classifyWithSubdivision(batchData, schema, label = '') {
         if (this.isCancelled) return [];
 
@@ -601,6 +620,7 @@ export class OrganizerService {
                 downloadBookmarks(finalResults);
             } else {
                 this.onProgress({ status: 'info', message: `Saving ${finalResults.length.toLocaleString()} chronological bookmarks${dateSpan ? ` (${dateSpan})` : ''} to browser...`, dateSpan });
+                if (!await this.prepareSnapshot(finalResults, this.doomedDuplicates || [])) return null;
                 const rootId = '2';
                 const folderTitle = "Chronological Bookmarks-" + new Date().toISOString().slice(0, 10);
                 const rootFolder = await findOrCreateFolder(rootId, folderTitle);
@@ -928,6 +948,7 @@ export class OrganizerService {
         } else {
             // Browser mode: relocate existing bookmarks (spec §6)
             this.onProgress({ status: 'info', message: `Reorganizing ${finalResults.length.toLocaleString()} bookmarks${dateSpan ? ` (${dateSpan})` : ''} in the browser...`, dateSpan });
+            if (!await this.prepareSnapshot(finalResults, this.doomedDuplicates || [])) return null;
             const rootId = '2'; // 'Other Bookmarks' usually
             const rootFolder = await findOrCreateFolder(rootId, "AI Organized Bookmarks-" + new Date().toISOString().slice(0, 10));
             clearFolderCache();
