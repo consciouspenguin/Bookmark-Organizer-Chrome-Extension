@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { Terminal, Play, AlertCircle, Plus, X, Bookmark, Upload, FileText, Lock, Zap, Download, Loader2, RefreshCw, Square, Copy, Check, ChevronDown, ChevronUp, Clock, ArrowDown, ArrowUp, ArrowDownAZ, ArrowUpAZ, Globe, FolderTree, ExternalLink, Calendar } from 'lucide-react'
 import { parseBookmarks } from '../utils/parser'
 import { calculateDateSpan } from '../utils/dates'
+import { saveInputBookmarkFile, getInputBookmarkFile, removeInputBookmarkFile, downloadInputBookmarkFile } from '../services/input_bookmarks'
 
 export const DEFAULT_CATEGORIES = [
     'Work & Career',
@@ -513,6 +514,7 @@ export default function Organizer() {
     // File Upload Handlers
     const [uploadedFile, setUploadedFile] = useState(null)
     const [parsedBookmarks, setParsedBookmarks] = useState(null)
+    const [inputFile, setInputFile] = useState(null)
     const fileInputRef = useRef(null)
 
     const addLog = useCallback((message) => {
@@ -533,6 +535,9 @@ export default function Organizer() {
                 const span = calculateDateSpan(links);
                 setUploadedFile(file);
                 setParsedBookmarks(links);
+                saveInputBookmarkFile({ filename: file.name, html: content, count: links.length, dateSpan: span })
+                    .then((res) => { if (res.saved) setInputFile(res.entry); else addLog('Input file too large to cache (25 MB limit) — organize continues; keep your own copy of the original.'); })
+                    .catch(() => addLog('Could not cache the input file locally.'))
                 if (span) setActiveDateSpan(span);
                 setErrorMsg('');
                 addLog(`Loaded ${file.name} (${links.length.toLocaleString()} bookmarks found${span ? ` · Dates ${span}` : ''})`);
@@ -557,6 +562,37 @@ export default function Organizer() {
 
     const handleDragOver = useCallback((e) => {
         e.preventDefault();
+    }, [])
+
+    // Restore the cached dropped-in file (spec §12) on mount.
+    useEffect(() => {
+        getInputBookmarkFile()
+            .then((entry) => { if (entry) setInputFile(entry) })
+            .catch(() => {})
+    }, [])
+
+    const handleDownloadInput = useCallback(() => {
+        if (inputFile) downloadInputBookmarkFile(inputFile)
+    }, [inputFile])
+
+    const handleReorganizeInput = useCallback(() => {
+        if (!inputFile) return
+        try {
+            const links = parseBookmarks(inputFile.html)
+            const span = calculateDateSpan(links)
+            setParsedBookmarks(links)
+            if (span) setActiveDateSpan(span)
+            setErrorMsg('')
+            addLog(`Re-loaded ${inputFile.filename} from cached input (${links.length.toLocaleString()} bookmarks)`)
+        } catch (err) {
+            console.error(err)
+            setErrorMsg('Cached input file could not be parsed.')
+        }
+    }, [inputFile, addLog])
+
+    const handleRemoveInput = useCallback(async () => {
+        try { await removeInputBookmarkFile() } catch {}
+        setInputFile(null)
     }, [])
 
     // Auto-scroll logs
@@ -1573,6 +1609,7 @@ export default function Organizer() {
             {/* File Upload Area */}
             {status === 'idle' && (
                 <div
+                    data-testid="dropzone"
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
                     className={`upload-dropzone section-block ${uploadedFile ? 'has-file' : ''}`}
@@ -1626,6 +1663,27 @@ export default function Organizer() {
                             </div>
                         </div>
                     )}
+                </div>
+            )}
+
+            {/* Cached dropped-in input file (spec §12): pristine original kept for re-organize/download */}
+            {status === 'idle' && inputFile && (
+                <div className="input-bookmarks-card section-block">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Input Bookmarks</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                {inputFile.filename} · {(inputFile.count || 0).toLocaleString()} bookmarks
+                                {inputFile.dateSpan ? ` · Dates ${inputFile.dateSpan}` : ''}
+                                {' '}· saved {new Date(inputFile.savedAt).toLocaleString()}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button type="button" onClick={handleDownloadInput} title="Download the original file">Download</button>
+                            <button type="button" onClick={handleReorganizeInput} title="Organize from the cached original again">Re-organize</button>
+                            <button type="button" onClick={handleRemoveInput} title="Forget the cached input">Remove</button>
+                        </div>
+                    </div>
                 </div>
             )}
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import Organizer from './Organizer'
 import { OrganizerService } from '../services/organizer'
+import * as inputService from '../services/input_bookmarks'
 
 vi.mock('../services/organizer', () => {
     return {
@@ -33,6 +34,14 @@ vi.mock('../services/organizer', () => {
         ]
     }
 })
+
+vi.mock('../services/input_bookmarks', () => ({
+    INPUT_MAX_BYTES: 25 * 1024 * 1024,
+    saveInputBookmarkFile: vi.fn(async (input) => ({ saved: true, entry: { ...input, size: input.html.length, savedAt: 1757000000000 } })),
+    getInputBookmarkFile: vi.fn(async () => null),
+    removeInputBookmarkFile: vi.fn(async () => {}),
+    downloadInputBookmarkFile: vi.fn()
+}))
 
 describe('Organizer Component UI Tests', () => {
     beforeEach(() => {
@@ -620,6 +629,69 @@ describe('In-process and completion date range display', () => {
 
             expect(mockPort.postMessage).toHaveBeenCalledWith({ type: 'CANCEL_JOB' })
         })
+    })
+})
+
+describe('Input Bookmarks card', () => {
+    const cachedEntry = { filename: 'b.html', html: '<x/>', size: 4, savedAt: 1757000000000, count: 3462, dateSpan: null }
+
+    beforeEach(() => { inputService.getInputBookmarkFile.mockResolvedValue(null) })
+    afterEach(() => { vi.clearAllMocks(); cleanup(); delete global.chrome })
+
+    const chromeWith = (local = {}) => {
+        global.chrome = {
+            storage: {
+                local: { get: vi.fn((keys, cb) => cb(local)), set: vi.fn(), remove: vi.fn() },
+                session: { get: vi.fn((keys, cb) => cb({})), set: vi.fn() }
+            }
+        }
+    }
+
+    it('caches a dropped file and shows the card', async () => {
+        chromeWith({})
+        const { container } = render(<Organizer />)
+        const html = '<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p></DL><p>'
+        const file = new File([html], 'bookmarks_mpro13.html', { type: 'text/html' })
+        const zone = container.querySelector('[data-testid="dropzone"]')
+        fireEvent.drop(zone, { dataTransfer: { files: [file] } })
+        await waitFor(() => expect(inputService.saveInputBookmarkFile).toHaveBeenCalled())
+        const call = inputService.saveInputBookmarkFile.mock.calls[0][0]
+        expect(call.filename).toBe('bookmarks_mpro13.html')
+        expect(call.html).toBe(html) // raw, byte-for-byte
+        await waitFor(() => expect(container.querySelector('.input-bookmarks-card')).not.toBeNull())
+    })
+
+    it('renders the cached input as a card with Download, Re-organize, Remove', async () => {
+        chromeWith({})
+        inputService.getInputBookmarkFile.mockResolvedValue(cachedEntry)
+        const { container, getByText } = render(<Organizer />)
+        await waitFor(() => expect(container.querySelector('.input-bookmarks-card')).not.toBeNull())
+        expect(container.querySelector('.input-bookmarks-card').textContent).toContain('b.html')
+        expect(container.querySelector('.input-bookmarks-card').textContent).toContain('3,462')
+        expect(getByText('Download')).toBeTruthy()
+        expect(getByText('Re-organize')).toBeTruthy()
+        expect(getByText('Remove')).toBeTruthy()
+    })
+
+    it('Remove clears the card and calls the service', async () => {
+        chromeWith({})
+        inputService.getInputBookmarkFile.mockResolvedValue(cachedEntry)
+        const { container, getByText } = render(<Organizer />)
+        await waitFor(() => expect(container.querySelector('.input-bookmarks-card')).not.toBeNull())
+        fireEvent.click(getByText('Remove'))
+        await waitFor(() => expect(inputService.removeInputBookmarkFile).toHaveBeenCalled())
+        expect(container.querySelector('.input-bookmarks-card')).toBeNull()
+    })
+
+    it('Download emits the pristine original', async () => {
+        chromeWith({})
+        inputService.getInputBookmarkFile.mockResolvedValue(cachedEntry)
+        const { container, getByText } = render(<Organizer />)
+        await waitFor(() => expect(container.querySelector('.input-bookmarks-card')).not.toBeNull())
+        fireEvent.click(getByText('Download'))
+        expect(inputService.downloadInputBookmarkFile).toHaveBeenCalledWith(
+            expect.objectContaining({ html: '<x/>', filename: 'b.html' })
+        )
     })
 })
 
