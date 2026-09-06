@@ -1639,6 +1639,7 @@ export default function Organizer() {
                             {lastOrganized.stats?.dateSpan ? ` · ${formatDateSpan(lastOrganized.stats.dateSpan)}` : ' · dates not recorded'}
                             {lastOrganized.stats?.duplicatesRemoved > 0 && ` · ${lastOrganized.stats.duplicatesRemoved} dupes`}
                             {lastOrganized.stats?.deadLinksArchived > 0 && ` · ${lastOrganized.stats.deadLinksArchived} archived`}
+                            {lastOrganized.stats?.failedMoves?.length > 0 && ` · ${lastOrganized.stats.failedMoves.length} move${lastOrganized.stats.failedMoves.length === 1 ? '' : 's'} failed`}
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                             {lastOrganized.stats?.categoryBreakdown && Object.keys(lastOrganized.stats.categoryBreakdown).length > 0 && (

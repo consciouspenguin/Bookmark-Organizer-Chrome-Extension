@@ -611,7 +611,8 @@ export class OrganizerService {
                 categoryBreakdown: {},
                 isFlat: true,
                 dateSortOrder: this.dateSortOrder,
-                dateSpan
+                dateSpan,
+                failedMoves: this.failedMoves
             };
             finalResults.stats = this.stats;
 
@@ -634,6 +635,11 @@ export class OrganizerService {
             if (this.isCancelled) {
                 this.onProgress({ status: 'warning', message: 'Process cancelled.' });
                 return null;
+            }
+
+            if (this.failedMoves.length > 0) {
+                const n = this.failedMoves.length;
+                this.onProgress({ status: 'warning', message: `${n} move${n === 1 ? '' : 's'} failed and need${n === 1 ? 's' : ''} another run: ${this.failedMoves.map(f => f.title).slice(0, 5).join(', ')}${n > 5 ? '…' : ''}` });
             }
 
             this.onProgress({ status: 'done', message: 'Organization complete!' });
@@ -1031,7 +1037,8 @@ export class OrganizerService {
             categoryBreakdown,
             isFlat: false,
             schemaSortOrder: this.schemaSortOrder,
-            dateSpan
+            dateSpan,
+            failedMoves: this.failedMoves
         };
         finalResults.stats = this.stats;
 
@@ -1053,6 +1060,11 @@ export class OrganizerService {
                 ? `${generalShare}% of bookmarks (${generalCount.toLocaleString()}) landed in General — the AI struggled to find distinct subfolders. Try a different model or re-run.`
                 : `Filed directly under their category (General): ${generalCount.toLocaleString()} (${generalShare}%).`
         });
+
+        if (this.failedMoves.length > 0) {
+            const n = this.failedMoves.length;
+            this.onProgress({ status: 'warning', message: `${n} move${n === 1 ? '' : 's'} failed and need${n === 1 ? 's' : ''} another run: ${this.failedMoves.map(f => f.title).slice(0, 5).join(', ')}${n > 5 ? '…' : ''}` });
+        }
 
         this.onProgress({ status: 'done', message: 'Organization complete!' });
         return finalResults;

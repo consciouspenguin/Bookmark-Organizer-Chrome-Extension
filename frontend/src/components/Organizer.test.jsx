@@ -288,6 +288,15 @@ describe('Last run banner date reporting', () => {
         expect(text.trimStart().startsWith(runTime)).toBe(true)
     })
 
+    it('shows failed moves in the last-run banner', () => {
+        const text = bannerText({
+            total: 3, isFlat: false, duplicatesRemoved: 0, deadLinksArchived: 0,
+            categoriesCount: 1, categoryBreakdown: {},
+            failedMoves: [{ title: 'X', reason: 'gone' }]
+        })
+        expect(text).toContain('1 move failed')
+    })
+
     it('displays date span in the idle schema drawer header when expanded', async () => {
         global.chrome = {
             storage: {

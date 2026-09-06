@@ -1882,6 +1882,23 @@ describe('categorized browser write moves and isolates failures', () => {
         expect(store.node('11').parentId).toBe('folder-Tech') // the healthy sibling still moved
         expect(store.node('10').parentId).toBe('1')
     })
+
+    it('reports failedMoves in stats and logs the count', async () => {
+        const logs = []
+        const store = new FakeBookmarkStore()
+        store.addUrl('1', '10', 'https://a.com', 'A', 1500000000000)
+        arrangeCategorized(store)
+        vi.spyOn(bookmarksService, 'findOrCreateFolder')
+            .mockResolvedValueOnce(store.addFolder('2', 'org-root-1', 'AI Organized Bookmarks-2026-09-05'))
+            .mockRejectedValue(new Error('quota exceeded'))
+
+        const service = new OrganizerService('test-key', ['Tech'], (d) => d.message && logs.push(d.message), 'google/gemini-3.1-flash-lite', '5-10', false, true, false, false, 'desc', 'alpha')
+        service.snapshotProvider = async () => {}
+        await service.start(null)
+
+        expect(service.stats.failedMoves).toEqual([{ title: 'A', reason: 'quota exceeded' }])
+        expect(logs.some(m => m.includes('1 move failed'))).toBe(true)
+    })
 })
 
 describe('Phase B reorder pass and idempotency', () => {
